@@ -4,7 +4,9 @@ import gnu.client.event.*;
 import gnu.client.helper.RotationHelper;
 import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.runtime.FreeLookHook;
+import gnu.client.ui.menu.GnuMainMenuScreen;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.settings.GameSettings;
@@ -15,6 +17,7 @@ import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
@@ -169,6 +172,33 @@ public class MixinMinecraft {
     )
     public void onRunTickAfterRightClickDelay(CallbackInfo ci) {
         MinecraftForge.EVENT_BUS.post(new RightClickDelayTickEvent());
+    }
+
+    /**
+     * Replace title screens ({@link GuiMainMenu} or mod subclasses such as OptiFine).
+     * Does not cover {@code displayGuiScreen(null)}: that builds {@code new GuiMainMenu()}
+     * inside the method after HEAD, so {@link #gnu$ensureCustomMainMenu} catches it.
+     */
+    @ModifyVariable(method = "displayGuiScreen(Lnet/minecraft/client/gui/GuiScreen;)V", at = @At("HEAD"), argsOnly = true)
+    private GuiScreen gnu$replaceMainMenu(GuiScreen screen) {
+        if (screen instanceof GuiMainMenu) {
+            return new GnuMainMenuScreen();
+        }
+        return screen;
+    }
+
+    /**
+     * First boot / disconnect uses {@code displayGuiScreen(null)} which constructs
+     * {@link GuiMainMenu} after args are read. Replace any {@link GuiMainMenu} (including
+     * subclasses); {@link GnuMainMenuScreen} is not a {@code GuiMainMenu}, so no recurse.
+     */
+    @Inject(method = "displayGuiScreen(Lnet/minecraft/client/gui/GuiScreen;)V", at = @At("RETURN"))
+    private void gnu$ensureCustomMainMenu(GuiScreen screen, CallbackInfo ci) {
+        Minecraft mc = (Minecraft) (Object) this;
+        GuiScreen current = mc.currentScreen;
+        if (current instanceof GuiMainMenu) {
+            mc.displayGuiScreen(new GnuMainMenuScreen());
+        }
     }
 
     @Inject(method = "displayGuiScreen(Lnet/minecraft/client/gui/GuiScreen;)V", at = @At("HEAD"))

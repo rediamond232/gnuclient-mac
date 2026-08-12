@@ -165,9 +165,5 @@ public final class ClientEventListener {
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())
             ((LagrangeModule) lagrange).noteForgeAttack(event.target);
-
-        Module velocity = ModuleManager.INSTANCE.getModule("Velocity");
-        if (velocity instanceof VelocityModule && velocity.isEnabled())
-            ((VelocityModule) velocity).noteAttack(event.target);
     }
 }

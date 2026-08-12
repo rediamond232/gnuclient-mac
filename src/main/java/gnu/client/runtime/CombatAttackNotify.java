@@ -4,6 +4,7 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.MoreKBModule;
+import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.entity.Entity;
@@ -57,6 +58,10 @@ public final class CombatAttackNotify {
         Module moreKb = ModuleManager.INSTANCE.getModule("MoreKB");
         if (moreKb instanceof MoreKBModule && moreKb.isEnabled() && target instanceof Entity)
             ((MoreKBModule) moreKb).noteForgeAttack((Entity) target);
+
+        Module velocity = ModuleManager.INSTANCE.getModule("Velocity");
+        if (velocity instanceof VelocityModule && velocity.isEnabled())
+            ((VelocityModule) velocity).noteAttack(target);
     }
 
     public static void tickReachOnLmbEdge() {

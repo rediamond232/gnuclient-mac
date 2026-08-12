@@ -21,6 +21,7 @@ import gnu.client.module.modules.combat.velocity.LegitVelocity;
 import gnu.client.module.modules.combat.velocity.MMCVelocity;
 import gnu.client.module.modules.combat.velocity.MatrixVelocity;
 import gnu.client.module.modules.combat.velocity.OMDelayVelocity;
+import gnu.client.module.modules.combat.velocity.HypixelVelocity;
 import gnu.client.module.modules.combat.velocity.RedeskyVelocity;
 import gnu.client.module.modules.combat.velocity.ReverseVelocity;
 import gnu.client.module.modules.combat.velocity.StandardVelocity;
@@ -62,7 +63,8 @@ public final class VelocityModule extends Module implements PacketListener {
 
     private static final List<String> MODE_NAMES = Collections.unmodifiableList(Arrays.asList(
             "OMDelay", "Reverse", "LegitTest", "LegitSmart", "IntaveReduce", "Grimtest", "JumpReset",
-            "Standard", "AAC", "Bounce", "BufferAbuse", "Delay", "Grim", "GrimReduce", "Ground", "Intave",
+            "Standard", "AAC", "Bounce", "BufferAbuse", "Delay", "Grim", "GrimReduce", "Ground",
+            "Hypixel", "Intave",
             "Karhu", "Legit", "MMC", "Matrix", "Redesky", "Tick", "UniversoCraft", "Vulcan",
             "WatchdogPrediction", "Watchdog"));
 
@@ -158,6 +160,7 @@ public final class VelocityModule extends Module implements PacketListener {
         modes.add(new GrimVelocity(this));
         modes.add(new GrimReduceVelocity(this));
         modes.add(new GroundVelocity(this));
+        modes.add(new HypixelVelocity(this));
         modes.add(new IntaveVelocity(this));
         modes.add(new KarhuVelocity(this));
         modes.add(new LegitVelocity(this));
@@ -310,5 +313,10 @@ public final class VelocityModule extends Module implements PacketListener {
                 return true;
         }
         return false;
+    }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { mode.getCurrentMode() };
     }
 }

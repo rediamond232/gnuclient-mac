@@ -12,7 +12,7 @@ import static org.junit.Assert.assertTrue;
 public class VelocityModuleModesTest {
 
     @Test
-    public void registersTwentySixModesAndDefaultsToStandard() {
+    public void registersTwentySevenModesAndDefaultsToStandard() {
         VelocityModule v = new VelocityModule();
         ModeSetting mode = null;
         for (Setting<?> s : v.getSettings()) {
@@ -20,7 +20,7 @@ public class VelocityModuleModesTest {
                 mode = (ModeSetting) s;
         }
         assertNotNull(mode);
-        assertEquals(26, mode.getModes().size());
+        assertEquals(27, mode.getModes().size());
         assertEquals("Standard", mode.getCurrentMode());
         assertEquals(7, mode.getIndex());
 

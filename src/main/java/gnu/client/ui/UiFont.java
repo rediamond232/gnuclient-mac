@@ -57,6 +57,12 @@ public final class UiFont {
         return mode;
     }
 
+    /** Bake Inter atlases if needed; {@code true} when modern glyphs are usable. */
+    public static boolean ensureModernReady() {
+        ensureReady();
+        return !atlasFailed && atlas8 != null && atlas9 != null;
+    }
+
     public static float width(String text) {
         return width(text, SIZE_UI);
     }
@@ -114,6 +120,7 @@ public final class UiFont {
         ensureReady();
         float sx = UiKit.PixelAlign.snap(x, currentScale());
         float sy = UiKit.PixelAlign.snap(y, currentScale());
+        UiKit.prepareFixedPipeline();
         FontRenderer fr = mcFont();
         if (useMinecraft()) {
             if (fr != null) {
@@ -138,25 +145,28 @@ public final class UiFont {
         float b = (argb & 0xFF) / 255f;
         float scale = currentScale();
 
+        UiKit.prepareFixedPipeline();
+        int texId = atlas.texture.getGlTextureId();
+        UiKit.syncTextureBind(texId);
+        applyLinearFilter(atlas.texture);
+
         GlStateManager.enableBlend();
         GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
-        GlStateManager.enableTexture2D();
         GlStateManager.color(r, g, b, a);
 
         GL11.glPushMatrix();
         GL11.glScalef(1f / scale, 1f / scale, 1f);
         float px = x * scale;
         float py = y * scale;
-        GlStateManager.bindTexture(atlas.texture.getGlTextureId());
-        applyLinearFilter(atlas.texture);
 
         boolean modernBound = true;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c < GLYPH_COUNT && atlas.glyphs[c] != null) {
                 if (!modernBound) {
+                    UiKit.prepareFixedPipeline();
                     GlStateManager.color(r, g, b, a);
-                    GlStateManager.bindTexture(atlas.texture.getGlTextureId());
+                    UiKit.syncTextureBind(texId);
                     modernBound = true;
                 }
                 Glyph glyph = atlas.glyphs[c];
@@ -168,6 +178,8 @@ public final class UiFont {
                 float logicalY = py / scale;
                 FontRenderer fr = mcFont();
                 if (fr != null) {
+                    UiKit.prepareFixedPipeline();
+                    UiKit.invalidateTextureBind();
                     fr.drawString(String.valueOf(c), logicalX, logicalY, argb, false);
                     px += fr.getCharWidth(c) * scale;
                 }
