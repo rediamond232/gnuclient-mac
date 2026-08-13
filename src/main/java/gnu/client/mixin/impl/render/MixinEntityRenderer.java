@@ -7,6 +7,7 @@ import gnu.client.module.modules.settings.GraphicsModule;
 import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.render.graphics.color.CustomColors;
 import gnu.client.render.graphics.fog.GraphicsFog;
+import gnu.client.render.MotionBlur;
 import gnu.client.render.shaders.ShaderEngine;
 import gnu.client.runtime.FreeLookHook;
 import net.minecraft.client.Minecraft;
@@ -271,6 +272,11 @@ public class MixinEntityRenderer {
     @Inject(method = "renderHand", at = @At("RETURN"))
     private void gnu$shaderHandEnd(float partialTicks, int xOffset, CallbackInfo ci) {
         ShaderEngine.INSTANCE.endHand();
+    }
+
+    @Inject(method = "renderHand", at = @At("RETURN"))
+    private void gnu$motionBlur(float partialTicks, int xOffset, CallbackInfo ci) {
+        MotionBlur.apply();
     }
 
     @Inject(method = "renderWorld", at = @At("RETURN"))

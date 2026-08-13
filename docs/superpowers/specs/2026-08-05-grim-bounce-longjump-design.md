@@ -45,38 +45,45 @@ While enabled and armed:
 
 | Setting | Default | Purpose |
 |--------|---------|---------|
-| TimerSpeed | ~1.5–2.0 | Pulse speed while arming into bounce/setback |
-| TimerTicks | ~3–8 | How long Timer stays elevated |
-| VelocityMultiply | ~1.5–2.5 | One-shot multiply factor on capture |
-| RequireBounce | true | Only fire when bounce block / bounce `motionY` detected |
-| Cooldown | ~20–40 ticks | Lockout after a successful or failed attempt |
+| TimerSpeed | 1.8 | Pulse speed while arming into bounce/setback |
+| TimerTicks | 5 | How long Timer stays elevated |
+| VelocityMultiply | 2.0 | One-shot multiply factor on capture |
+| RequireBounce | true | Require bounce block / bounce `motionY` before capture |
+| Cooldown | 30 | Lockout ticks after a successful or abandoned attempt |
 
 ## State machine
 
 ```
 Idle
-  → (airborne + enabled) → Arming
+  → (enabled, not cooling down, falling motionY < 0) → Arming
 Arming
-  → start Timer pulse
-  → wait for bounce impulse and/or S08/S12 setback in window
+  → start Timer pulse (TimerTicks)
+  → wait for capture condition in window
   → on capture: Multiply once → Release
+  → on TimerTicks expiry without capture → Release (no multiply) → Cooldown
 Release
-  → Timer = 1.0, clear multiply
+  → Timer restored, clear multiply flag
   → Cooldown → Idle
 ```
 
 ### Capture rules
 
-Capture fires **once** per attempt when either:
+Capture fires **once** per arming window.
 
-- Bounce detected: standing/landing on slime or bed, or `motionY` reverse consistent with bounce, **or**
-- Setback velocity: inbound `S08` and/or `S12` for the local player during the arming/timer window
+When `RequireBounce` is true (default):
+
+- Bounce must be detected first (feet on slime/bed, or `motionY` flip from negative to strong positive consistent with bounce), **and**
+- Optionally also amplify if `S12` for the local player arrives in the same window (setback/bounce velocity packet)
+
+When `RequireBounce` is false:
+
+- First local `S08`/`S12` during arming is enough to capture
 
 On capture:
 
-- `motion *= VelocityMultiply` (or multiply the inbound `S12` components once if capturing from packet)  
+- Multiply current client motion by `VelocityMultiply` once (after vanilla has applied any inbound `S12`)  
 - Do **not** keep multiplying on later ticks  
-- Hard-disable Timer pulse the same tick
+- End Timer pulse the same tick
 
 ### Interaction with existing Timer module
 

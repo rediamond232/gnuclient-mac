@@ -53,6 +53,7 @@ import gnu.client.module.modules.visual.FreeLookModule;
 import gnu.client.module.modules.visual.AnimationsModule;
 import gnu.client.module.modules.visual.HudModule;
 import gnu.client.module.modules.visual.ItemEspModule;
+import gnu.client.module.modules.visual.MotionBlurModule;
 import gnu.client.module.modules.visual.NameTagsModule;
 import gnu.client.module.modules.visual.TracersModule;
 import gnu.client.module.modules.visual.ZoomModule;
@@ -162,6 +163,7 @@ public class GnuClientMod {
         safeRegister(new PingFixModule());
         safeRegister(new FreeLookModule());
         safeRegister(new ZoomModule());
+        safeRegister(new MotionBlurModule());
         safeRegister(new NoFallModule());
         safeRegister(new ScaffoldModule());
         safeRegister(new GhostBlocksModule());
