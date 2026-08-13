@@ -6,7 +6,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.OpenGlHelper;
+import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.client.renderer.WorldRenderer;
 import net.minecraft.client.renderer.texture.TextureUtil;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
@@ -19,8 +22,9 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
- * ClickGUI-only optional half-res separable blur. Default off; permanent session
- * fallback on probe/runtime failure. Not for HUD.
+ * Optional Dual Kawase blur for ClickGUI, menus, and HUD backdrops.
+ * Starts at half-res, then down/up-samples through a small FBO pyramid.
+ * Permanent session fallback on probe/runtime failure.
  * <p>
  * Allocates private FBOs via {@link OpenGlHelper} directly so blur still works when
  * video-settings "Use FBOs" is off (Minecraft's {@code Framebuffer} class stubs in
@@ -30,9 +34,15 @@ public final class UiBlur {
 
     private static final ResourceLocation VERT =
             new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_blur.vert");
-    private static final ResourceLocation FRAG =
-            new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_blur.frag");
-    private static final float BLUR_RADIUS = 4f;
+    private static final ResourceLocation FRAG_DOWN =
+            new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_kawase_down.frag");
+    private static final ResourceLocation FRAG_UP =
+            new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_kawase_up.frag");
+    private static final ResourceLocation FRAG_ROUND =
+            new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_blur_round.frag");
+    /** Half-res plus two further downs (1/4, 1/8 of the window). */
+    private static final int KAWASE_LEVELS = 3;
+    private static final float KAWASE_OFFSET = 2.5f;
 
     private static boolean probed;
     private static boolean supported;
@@ -40,14 +50,21 @@ public final class UiBlur {
     private static boolean failLogged;
     private static boolean enabledSetting;
 
-    private static int program;
-    private static int uniDiffuse;
-    private static int uniInSize;
-    private static int uniBlurDir;
-    private static int uniRadius;
+    private static int programDown;
+    private static int programUp;
+    private static int programRound;
+    private static int downDiffuse;
+    private static int downHalfPixel;
+    private static int upDiffuse;
+    private static int upHalfPixel;
+    private static int roundDiffuse;
+    private static int roundSize;
+    private static int roundRadius;
+    private static int roundAlpha;
+    private static int roundUv0;
+    private static int roundUv1;
 
-    private static BlurPass passA;
-    private static BlurPass passB;
+    private static BlurPass[] levels;
     /** Full-res scratch for window capture when game FBOs are off. */
     private static BlurPass windowScratch;
     private static boolean frameActive;
@@ -98,14 +115,14 @@ public final class UiBlur {
                 failSession("GL framebuffer extension unsupported");
                 return false;
             }
-            if (!compileProgram()) {
+            if (!compilePrograms()) {
                 probed = true;
                 supported = false;
                 failSession("shader compile failed");
                 return false;
             }
-            ensureFramebuffers(Math.max(1, mc.displayWidth / 2), Math.max(1, mc.displayHeight / 2));
-            if (passA == null || passB == null || !passA.isValid() || !passB.isValid()) {
+            ensureFramebuffers(Math.max(1, mc.displayWidth), Math.max(1, mc.displayHeight));
+            if (!levelsValid()) {
                 probed = true;
                 supported = false;
                 failSession("fbo alloc failed");
@@ -137,9 +154,7 @@ public final class UiBlur {
             return;
         }
         try {
-            int halfW = Math.max(1, mc.displayWidth / 2);
-            int halfH = Math.max(1, mc.displayHeight / 2);
-            ensureFramebuffers(halfW, halfH);
+            ensureFramebuffers(Math.max(1, mc.displayWidth), Math.max(1, mc.displayHeight));
             frameActive = true;
         } catch (Throwable t) {
             failSession(t.getMessage());
@@ -154,14 +169,64 @@ public final class UiBlur {
 
     public static void drawPanel(float x, float y, float w, float h, float radius, float alpha,
             float contentScale) {
-        int color = UiKit.withAlpha(UiKit.SURFACE, alpha);
+        drawBlurredRegion(x, y, w, h, radius, alpha, contentScale, 0.55f, true);
+    }
+
+    /**
+     * Soft blurred backdrop with almost no solid fill — for ArrayList / glow-under text.
+     */
+    public static void drawSoftBehind(float x, float y, float w, float h, float radius, float alpha) {
+        drawSoftBehind(x, y, w, h, radius, alpha, 1f);
+    }
+
+    public static void drawSoftBehind(float x, float y, float w, float h, float radius, float alpha,
+            float contentScale) {
+        // Light wash only; callers add glow themselves. No opaque pill fallback.
+        drawBlurredRegion(x, y, w, h, radius, alpha, contentScale, 0f, false);
+    }
+
+    /**
+     * Frosted-glass pill: Kawase blur plus a light surface wash. Used by ArrayList
+     * rows so labels stay readable without a fully opaque backdrop.
+     */
+    public static void drawFrostedBehind(float x, float y, float w, float h, float radius, float alpha) {
+        drawFrostedBehind(x, y, w, h, radius, alpha, 1f);
+    }
+
+    public static void drawFrostedBehind(float x, float y, float w, float h, float radius, float alpha,
+            float contentScale) {
+        drawBlurredRegion(x, y, w, h, radius, alpha, contentScale, 0.42f, true);
+    }
+
+    /** Full-screen composite of the current Kawase buffer (no extra tint). */
+    public static void drawFullscreen(float alpha) {
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc == null) {
+            return;
+        }
+        ScaledResolution sr = new ScaledResolution(mc);
+        drawBlurredRegion(0f, 0f, sr.getScaledWidth(), sr.getScaledHeight(), 0f, alpha, 1f, 0f, false);
+    }
+
+    private static void drawBlurredRegion(float x, float y, float w, float h, float radius,
+            float alpha, float contentScale, float tintStrength, boolean solidFallback) {
+        float tint = UiKit.clamp01(tintStrength) * UiKit.clamp01(alpha);
+        int color = UiKit.withAlpha(UiKit.SURFACE, tint);
         if (!frameActive || sessionFailed) {
-            UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            if (solidFallback) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, UiKit.withAlpha(UiKit.SURFACE, alpha));
+            } else if (tint > 0.01f) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            }
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
         if (mc == null) {
-            UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            if (solidFallback) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, UiKit.withAlpha(UiKit.SURFACE, alpha));
+            } else if (tint > 0.01f) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            }
             return;
         }
         try {
@@ -169,12 +234,16 @@ public final class UiBlur {
                 captureAndBlur(mc);
                 captured = true;
             }
-            compositePanel(mc, x, y, w, h, radius, alpha, contentScale);
+            compositePanel(mc, x, y, w, h, radius, alpha, contentScale, tintStrength);
         } catch (Throwable t) {
             failSession(t.getMessage());
-            GnuLog.logError("UiBlur drawPanel failed", t);
+            GnuLog.logError("UiBlur draw failed", t);
             restoreMain(mc);
-            UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            if (solidFallback) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, UiKit.withAlpha(UiKit.SURFACE, alpha));
+            } else if (tint > 0.01f) {
+                UiKit.drawRoundedPanel(x, y, w, h, radius, color);
+            }
         }
     }
 
@@ -196,10 +265,11 @@ public final class UiBlur {
     }
 
     private static void captureAndBlur(Minecraft mc) {
-        int halfW = passA.width;
-        int halfH = passA.height;
+        BlurPass half = levels[0];
+        int halfW = half.width;
+        int halfH = half.height;
 
-        // Blur passes bind half-res viewports; must restore before any ClickGUI draw.
+        // Blur passes bind pyramid viewports; must restore before any UI draw.
         int[] prevViewport = new int[4];
         java.nio.IntBuffer vpBuf = org.lwjgl.BufferUtils.createIntBuffer(16);
         GL11.glGetInteger(GL11.GL_VIEWPORT, vpBuf);
@@ -211,11 +281,8 @@ public final class UiBlur {
         int matrixMode = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glPushMatrix();
-        GL11.glLoadIdentity();
-        GL11.glOrtho(0.0, halfW, 0.0, halfH, -1.0, 1.0);
         GL11.glMatrixMode(GL11.GL_MODELVIEW);
         GL11.glPushMatrix();
-        GL11.glLoadIdentity();
 
         boolean depthWas = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
         boolean blendWas = GL11.glIsEnabled(GL11.GL_BLEND);
@@ -226,31 +293,21 @@ public final class UiBlur {
             GlStateManager.enableTexture2D();
             if (OpenGlHelper.isFramebufferEnabled() && mc.getFramebuffer() != null
                     && mc.getFramebuffer().framebufferTexture > 0) {
-                passA.clear();
-                passA.bind(true);
+                half.clear();
+                half.bind(true);
+                setPassOrtho(halfW, halfH);
                 GlStateManager.bindTexture(mc.getFramebuffer().framebufferTexture);
                 drawTexturedQuad(0, 0, halfW, halfH, true);
             } else {
-                copyWindowColorIntoPassA(mc, halfW, halfH);
+                copyWindowColorIntoHalf(mc, halfW, halfH);
             }
 
-            // Horizontal blur: passA -> passB
-            passB.clear();
-            passB.bind(true);
-            GL20.glUseProgram(program);
-            GL20.glUniform1i(uniDiffuse, 0);
-            GL20.glUniform2f(uniInSize, halfW, halfH);
-            GL20.glUniform2f(uniBlurDir, 1f, 0f);
-            GL20.glUniform1f(uniRadius, BLUR_RADIUS);
-            GlStateManager.bindTexture(passA.tex);
-            drawTexturedQuad(0, 0, halfW, halfH, false);
-
-            // Vertical blur: passB -> passA
-            passA.clear();
-            passA.bind(true);
-            GL20.glUniform2f(uniBlurDir, 0f, 1f);
-            GlStateManager.bindTexture(passB.tex);
-            drawTexturedQuad(0, 0, halfW, halfH, false);
+            for (int i = 0; i < levels.length - 1; i++) {
+                kawaseBlit(levels[i], levels[i + 1], programDown, downDiffuse, downHalfPixel);
+            }
+            for (int i = levels.length - 2; i >= 0; i--) {
+                kawaseBlit(levels[i + 1], levels[i], programUp, upDiffuse, upHalfPixel);
+            }
         } finally {
             if (depthWas) {
                 GlStateManager.enableDepth();
@@ -273,12 +330,34 @@ public final class UiBlur {
         }
     }
 
+    private static void kawaseBlit(BlurPass src, BlurPass dst, int program, int uniDiffuse,
+            int uniHalfPixel) {
+        dst.clear();
+        dst.bind(true);
+        setPassOrtho(dst.width, dst.height);
+        GL20.glUseProgram(program);
+        GL20.glUniform1i(uniDiffuse, 0);
+        GL20.glUniform2f(uniHalfPixel,
+                KAWASE_OFFSET * 0.5f / Math.max(1, src.width),
+                KAWASE_OFFSET * 0.5f / Math.max(1, src.height));
+        GlStateManager.bindTexture(src.tex);
+        drawTexturedQuad(0, 0, dst.width, dst.height, false);
+    }
+
+    private static void setPassOrtho(int w, int h) {
+        GL11.glMatrixMode(GL11.GL_PROJECTION);
+        GL11.glLoadIdentity();
+        GL11.glOrtho(0.0, w, 0.0, h, -1.0, 1.0);
+        GL11.glMatrixMode(GL11.GL_MODELVIEW);
+        GL11.glLoadIdentity();
+    }
+
     /**
      * When Minecraft is not rendering into an FBO, copy the window into a full-res scratch
      * texture ({@code glCopyTexSubImage2D} — does not reallocate / invalidate FBO attachments),
-     * then downsample into {@code passA}.
+     * then downsample into the half-res Kawase root.
      */
-    private static void copyWindowColorIntoPassA(Minecraft mc, int halfW, int halfH) {
+    private static void copyWindowColorIntoHalf(Minecraft mc, int halfW, int halfH) {
         int dw = Math.max(1, mc.displayWidth);
         int dh = Math.max(1, mc.displayHeight);
         if (windowScratch == null) {
@@ -290,41 +369,98 @@ public final class UiBlur {
         // SubImage keeps existing tex storage so pass FBOs stay complete.
         GL11.glCopyTexSubImage2D(GL11.GL_TEXTURE_2D, 0, 0, 0, 0, 0, dw, dh);
 
-        passA.clear();
-        passA.bind(true);
+        levels[0].clear();
+        levels[0].bind(true);
+        setPassOrtho(halfW, halfH);
         GlStateManager.bindTexture(windowScratch.tex);
         // Window color is lower-left origin; flip V to match the game-FBO capture path.
         drawTexturedQuad(0, 0, halfW, halfH, true);
     }
 
     private static void compositePanel(Minecraft mc, float x, float y, float w, float h,
-            float radius, float alpha, float contentScale) {
+            float radius, float alpha, float contentScale, float tintStrength) {
         // Ensure we draw panels to the game target with a full-size viewport.
         restoreMain(mc);
         ScaledResolution sr = new ScaledResolution(mc);
-        float fbScale = sr.getScaleFactor() * (contentScale <= 0f ? 1f : contentScale);
-        UiKit.FbRect scissor = UiKit.PixelAlign.toFramebufferRect(x, y, w, h, fbScale,
-                mc.displayWidth, mc.displayHeight);
+        float scale = contentScale <= 0f ? 1f : contentScale;
+        float sx = x * scale;
+        float sy = y * scale;
+        float sw = w * scale;
+        float sh = h * scale;
+        float u0 = sx / sr.getScaledWidth();
+        float v0 = 1f - (sy + sh) / sr.getScaledHeight();
+        float u1 = (sx + sw) / sr.getScaledWidth();
+        float v1 = 1f - sy / sr.getScaledHeight();
 
         GlStateManager.enableBlend();
         GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
         GlStateManager.enableTexture2D();
         GlStateManager.color(1f, 1f, 1f, UiKit.clamp01(alpha));
-        GlStateManager.bindTexture(passA.tex);
+        GlStateManager.bindTexture(levels[0].tex);
 
+        float r = Math.max(0f, Math.min(radius, Math.min(w, h) * 0.5f));
+        if (r > 0.25f && programRound != 0) {
+            compositeRounded(x, y, w, h, r, alpha, u0, v0, u1, v1);
+        } else {
+            compositeScissored(mc, x, y, w, h, sr.getScaleFactor() * scale, u0, v0, u1, v1);
+        }
+
+        float tint = UiKit.clamp01(alpha) * UiKit.clamp01(tintStrength);
+        if (tint > 0.01f) {
+            UiKit.RoundedPanel.draw(x, y, w, h, radius, UiKit.withAlpha(UiKit.SURFACE, tint));
+        }
+        GlStateManager.color(1f, 1f, 1f, 1f);
+    }
+
+    /** SDF-clipped blit so blur follows the same rounded corners as the frost wash. */
+    private static void compositeRounded(float x, float y, float w, float h, float radius,
+            float alpha, float u0, float v0, float u1, float v1) {
+        boolean alphaWas = GL11.glIsEnabled(GL11.GL_ALPHA_TEST);
+        GlStateManager.disableAlpha();
+        GlStateManager.enableTexture2D();
+        GlStateManager.bindTexture(levels[0].tex);
+        GL20.glUseProgram(programRound);
+        GL20.glUniform1i(roundDiffuse, 0);
+        GL20.glUniform2f(roundSize, w, h);
+        GL20.glUniform1f(roundRadius, radius);
+        GL20.glUniform1f(roundAlpha, UiKit.clamp01(alpha));
+        // local (0,0) is GUI top-left; blur V is inverted vs GUI Y.
+        GL20.glUniform2f(roundUv0, u0, v1);
+        GL20.glUniform2f(roundUv1, u1, v0);
+
+        float pad = 1f;
+        float x0 = x - pad;
+        float y0 = y - pad;
+        float x1 = x + w + pad;
+        float y1 = y + h + pad;
+        float lu0 = -pad / w;
+        float lv0 = -pad / h;
+        float lu1 = 1f + pad / w;
+        float lv1 = 1f + pad / h;
+
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
+        wr.pos(x0, y1, 0.0).tex(lu0, lv1).endVertex();
+        wr.pos(x1, y1, 0.0).tex(lu1, lv1).endVertex();
+        wr.pos(x1, y0, 0.0).tex(lu1, lv0).endVertex();
+        wr.pos(x0, y0, 0.0).tex(lu0, lv0).endVertex();
+        tess.draw();
+
+        GL20.glUseProgram(0);
+        if (alphaWas) {
+            GlStateManager.enableAlpha();
+        }
+    }
+
+    private static void compositeScissored(Minecraft mc, float x, float y, float w, float h,
+            float fbScale, float u0, float v0, float u1, float v1) {
+        UiKit.FbRect scissor = UiKit.PixelAlign.toFramebufferRect(x, y, w, h, fbScale,
+                mc.displayWidth, mc.displayHeight);
         boolean scissorWas = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
         IntScissor prev = IntScissor.capture();
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(scissor.x, scissor.y, Math.max(0, scissor.width), Math.max(0, scissor.height));
-
-        float sx = x * contentScale;
-        float sy = y * contentScale;
-        float sw = w * contentScale;
-        float sh = h * contentScale;
-        float u0 = sx / sr.getScaledWidth();
-        float v0 = 1f - (sy + sh) / sr.getScaledHeight();
-        float u1 = (sx + sw) / sr.getScaledWidth();
-        float v1 = 1f - sy / sr.getScaledHeight();
 
         GL11.glBegin(GL11.GL_QUADS);
         GL11.glTexCoord2f(u0, v1);
@@ -343,9 +479,6 @@ public final class UiBlur {
         } else {
             GL11.glDisable(GL11.GL_SCISSOR_TEST);
         }
-
-        UiKit.RoundedPanel.draw(x, y, w, h, radius, UiKit.withAlpha(UiKit.SURFACE, alpha * 0.55f));
-        GlStateManager.color(1f, 1f, 1f, 1f);
     }
 
     private static void restoreMain(Minecraft mc) {
@@ -361,26 +494,70 @@ public final class UiBlur {
         GL20.glUseProgram(0);
     }
 
-    private static void ensureFramebuffers(int width, int height) {
-        if (passA == null) {
-            passA = new BlurPass();
+    private static void ensureFramebuffers(int displayW, int displayH) {
+        if (levels == null) {
+            levels = new BlurPass[KAWASE_LEVELS];
+            for (int i = 0; i < KAWASE_LEVELS; i++) {
+                levels[i] = new BlurPass();
+            }
         }
-        if (passB == null) {
-            passB = new BlurPass();
+        int w = Math.max(1, displayW / 2);
+        int h = Math.max(1, displayH / 2);
+        for (int i = 0; i < KAWASE_LEVELS; i++) {
+            levels[i].ensure(w, h);
+            w = Math.max(1, w / 2);
+            h = Math.max(1, h / 2);
         }
-        passA.ensure(width, height);
-        passB.ensure(width, height);
     }
 
-    private static boolean compileProgram() throws Exception {
-        if (program != 0) {
+    private static boolean levelsValid() {
+        if (levels == null || levels.length != KAWASE_LEVELS) {
+            return false;
+        }
+        for (int i = 0; i < levels.length; i++) {
+            if (levels[i] == null || !levels[i].isValid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean compilePrograms() throws Exception {
+        if (programDown != 0 && programUp != 0) {
+            if (programRound == 0) {
+                String vertSrc = readResource(VERT);
+                if (vertSrc != null) {
+                    compileRoundProgram(vertSrc);
+                }
+            }
             return true;
         }
         String vertSrc = readResource(VERT);
-        String fragSrc = readResource(FRAG);
-        if (vertSrc == null || fragSrc == null) {
+        String downSrc = readResource(FRAG_DOWN);
+        String upSrc = readResource(FRAG_UP);
+        if (vertSrc == null || downSrc == null || upSrc == null) {
             return false;
         }
+        int down = linkProgram(vertSrc, downSrc);
+        if (down == 0) {
+            return false;
+        }
+        int up = linkProgram(vertSrc, upSrc);
+        if (up == 0) {
+            GL20.glDeleteProgram(down);
+            return false;
+        }
+        programDown = down;
+        programUp = up;
+        downDiffuse = GL20.glGetUniformLocation(programDown, "DiffuseSampler");
+        downHalfPixel = GL20.glGetUniformLocation(programDown, "HalfPixel");
+        upDiffuse = GL20.glGetUniformLocation(programUp, "DiffuseSampler");
+        upHalfPixel = GL20.glGetUniformLocation(programUp, "HalfPixel");
+        compileRoundProgram(vertSrc);
+        return true;
+    }
+
+    private static int linkProgram(String vertSrc, String fragSrc) {
         int vert = compileShader(vertSrc, GL20.GL_VERTEX_SHADER);
         int frag = compileShader(fragSrc, GL20.GL_FRAGMENT_SHADER);
         if (vert == 0 || frag == 0) {
@@ -390,7 +567,7 @@ public final class UiBlur {
             if (frag != 0) {
                 GL20.glDeleteShader(frag);
             }
-            return false;
+            return 0;
         }
         int prog = GL20.glCreateProgram();
         GL20.glAttachShader(prog, vert);
@@ -401,14 +578,9 @@ public final class UiBlur {
         if (GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) == 0) {
             GnuLog.log("UiBlur link log: " + GL20.glGetProgramInfoLog(prog, 1024));
             GL20.glDeleteProgram(prog);
-            return false;
+            return 0;
         }
-        program = prog;
-        uniDiffuse = GL20.glGetUniformLocation(program, "DiffuseSampler");
-        uniInSize = GL20.glGetUniformLocation(program, "InSize");
-        uniBlurDir = GL20.glGetUniformLocation(program, "BlurDir");
-        uniRadius = GL20.glGetUniformLocation(program, "Radius");
-        return true;
+        return prog;
     }
 
     private static int compileShader(String source, int type) {
@@ -471,20 +643,53 @@ public final class UiBlur {
             GnuLog.log("UiBlur disabled for session: " + reason);
         }
         disposeFramebuffers();
-        if (program != 0) {
-            GL20.glDeleteProgram(program);
-            program = 0;
+        if (programDown != 0) {
+            GL20.glDeleteProgram(programDown);
+            programDown = 0;
+        }
+        if (programUp != 0) {
+            GL20.glDeleteProgram(programUp);
+            programUp = 0;
+        }
+        if (programRound != 0) {
+            GL20.glDeleteProgram(programRound);
+            programRound = 0;
         }
     }
 
-    private static void disposeFramebuffers() {
-        if (passA != null) {
-            passA.delete();
-            passA = null;
+    /** Optional; scissor blit remains if this fails. */
+    private static void compileRoundProgram(String vertSrc) {
+        if (programRound != 0) {
+            return;
         }
-        if (passB != null) {
-            passB.delete();
-            passB = null;
+        String roundSrc = readResource(FRAG_ROUND);
+        if (roundSrc == null) {
+            GnuLog.log("UiBlur rounded composite shader missing; using scissor blit");
+            return;
+        }
+        int prog = linkProgram(vertSrc, roundSrc);
+        if (prog == 0) {
+            GnuLog.log("UiBlur rounded composite link failed; using scissor blit");
+            return;
+        }
+        programRound = prog;
+        roundDiffuse = GL20.glGetUniformLocation(programRound, "DiffuseSampler");
+        roundSize = GL20.glGetUniformLocation(programRound, "u_size");
+        roundRadius = GL20.glGetUniformLocation(programRound, "u_radius");
+        roundAlpha = GL20.glGetUniformLocation(programRound, "u_alpha");
+        roundUv0 = GL20.glGetUniformLocation(programRound, "u_uv0");
+        roundUv1 = GL20.glGetUniformLocation(programRound, "u_uv1");
+    }
+
+    private static void disposeFramebuffers() {
+        if (levels != null) {
+            for (int i = 0; i < levels.length; i++) {
+                if (levels[i] != null) {
+                    levels[i].delete();
+                    levels[i] = null;
+                }
+            }
+            levels = null;
         }
         if (windowScratch != null) {
             windowScratch.delete();

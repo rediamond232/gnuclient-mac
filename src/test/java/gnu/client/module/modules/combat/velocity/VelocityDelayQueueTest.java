@@ -3,8 +3,13 @@ package gnu.client.module.modules.combat.velocity;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class VelocityDelayQueueTest {
@@ -52,5 +57,44 @@ public class VelocityDelayQueueTest {
     public void ticksHeldZeroWhenNotDelaying() {
         assertFalse(queue.isDelaying());
         assertEquals(0L, queue.ticksHeld(99L));
+    }
+
+    /**
+     * Regression: offers arrive on the Netty I/O thread while the client thread drains, which
+     * threw {@code ConcurrentModificationException} when the backing store was an
+     * {@code ArrayDeque}.
+     */
+    @Test
+    public void concurrentOfferWhileFlushingDoesNotThrow() throws Exception {
+        final int count = 20_000;
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        CountDownLatch done = new CountDownLatch(1);
+
+        Thread producer = new Thread(() -> {
+            try {
+                for (int i = 0; i < count; i++)
+                    queue.offer(new Object());
+            } catch (Throwable t) {
+                failure.compareAndSet(null, t);
+            } finally {
+                done.countDown();
+            }
+        }, "test-netty-thread");
+
+        producer.start();
+        try {
+            while (done.getCount() > 0) {
+                queue.startDelay(0L);
+                queue.stopDelayAndFlush();
+            }
+            queue.stopDelayAndFlush();
+        } catch (Throwable t) {
+            failure.compareAndSet(null, t);
+        }
+
+        assertTrue(done.await(10, TimeUnit.SECONDS));
+        producer.join(10_000L);
+        assertNull(String.valueOf(failure.get()), failure.get());
+        assertFalse(queue.isDelaying());
     }
 }

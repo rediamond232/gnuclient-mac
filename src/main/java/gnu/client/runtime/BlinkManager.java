@@ -3,14 +3,20 @@ package gnu.client.runtime;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.utility.PacketUtils;
+import net.minecraft.network.Packet;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.Consumer;
 
 /**
- * Shared outbound blink ownership (OpenMyau BlinkManager).
- * AUTO_BLOCK used by KillAura blink modes; NO_SLOW reserved (do not activate this pass).
+ * Shared outbound blink ownership — matched to wsamiaw {@code BlinkManager}.
+ * AUTO_BLOCK used by KillAura blink modes; NO_SLOW reserved.
+ *
+ * <p>Critical wsamiaw behavior: while blinking, <b>C03 movement is held</b>
+ * (only keepalive/chat and the first empty-queue C0F are exempt). Flush uses
+ * {@link PacketUtils#sendPacketNoEvent} so releases bypass the send-event bus.
  */
 public final class BlinkManager implements PacketListener {
 
@@ -19,19 +25,23 @@ public final class BlinkManager implements PacketListener {
     private BlinkModules blinkModule = BlinkModules.NONE;
     private boolean blinking;
     private final Deque<Object> blinkedPackets = new ArrayDeque<>();
-    private Consumer<Object> flushSender = PacketUtil::sendPacketReleased;
+    private Consumer<Object> flushSender = BlinkManager::flushPacketNoEvent;
 
     public BlinkManager() {}
 
-    /** Test hook — default {@link PacketUtil#sendPacketReleased}. */
+    /** Test hook — default wsamiaw-style no-event flush. */
     public void setFlushSender(Consumer<Object> sender) {
-        this.flushSender = sender != null ? sender : PacketUtil::sendPacketReleased;
+        this.flushSender = sender != null ? sender : BlinkManager::flushPacketNoEvent;
+    }
+
+    private static void flushPacketNoEvent(Object packet) {
+        if (packet instanceof Packet)
+            PacketUtils.sendPacketNoEvent((Packet) packet);
     }
 
     /**
-     * OpenMyau offer exemptions: hold nothing when idle; never hold keepalive/chat;
-     * when the queue is empty, do not hold C0F. Does <em>not</em> use
-     * {@link PacketHelper#isBlinkOutboundExempt} (that would drop C02 and break autoblock).
+     * wsamiaw offer: hold everything except keepalive/chat; when the queue is
+     * empty, do not hold C0F. Movement (C03) is held — unlike older OpenMyau ports.
      */
     public boolean offerPacket(Object packet) {
         if (blinkModule == BlinkModules.NONE || packet == null)
@@ -55,54 +65,16 @@ public final class BlinkManager implements PacketListener {
         if (blinkModule != module)
             return false;
         blinking = false;
-        blinkModule = BlinkModules.NONE;
-        // Collapse duplicate sprint/sneak C0Bs between flying packets before release —
-        // AUTO_BLOCK flush uses fast-track and would bypass AuraCombatPacketGuard
-        // (Grim BadPacketsX).
-        collapseEntityActionsForFlush();
+        // wsamiaw: empty queue returns without clearing blinkModule.
+        if (blinkedPackets.isEmpty())
+            return true;
         while (!blinkedPackets.isEmpty()) {
             Object p = blinkedPackets.poll();
             if (p != null)
                 flushSender.accept(p);
         }
+        blinkModule = BlinkModules.NONE;
         return true;
-    }
-
-    /**
-     * At most one sprint and one sneak C0B between movement packets in the blink deque
-     * (same rule as Grim BadPacketsX / {@link AuraCombatPacketGuard}).
-     */
-    private void collapseEntityActionsForFlush() {
-        if (blinkedPackets.isEmpty())
-            return;
-        Deque<Object> out = new ArrayDeque<>();
-        boolean sprintSinceMove = false;
-        boolean sneakSinceMove = false;
-        for (Object p : blinkedPackets) {
-            if (PacketHelper.isPlayerMovement(p)) {
-                sprintSinceMove = false;
-                sneakSinceMove = false;
-                out.offer(p);
-                continue;
-            }
-            if (PacketHelper.isSprintEntityAction(p)) {
-                if (!sprintSinceMove) {
-                    out.offer(p);
-                    sprintSinceMove = true;
-                }
-                continue;
-            }
-            if (PacketHelper.isSneakEntityAction(p)) {
-                if (!sneakSinceMove) {
-                    out.offer(p);
-                    sneakSinceMove = true;
-                }
-                continue;
-            }
-            out.offer(p);
-        }
-        blinkedPackets.clear();
-        blinkedPackets.addAll(out);
     }
 
     public BlinkModules getBlinkingModule() {
@@ -117,9 +89,21 @@ public final class BlinkManager implements PacketListener {
         return blinkedPackets.size();
     }
 
+    /** wsamiaw {@code countMovement} — C03s currently held. */
+    public long countMovement() {
+        long n = 0L;
+        for (Object p : blinkedPackets) {
+            if (PacketHelper.isPlayerMovement(p))
+                n++;
+        }
+        return n;
+    }
+
     @Override
     public boolean onSend(Object packet) {
         if (PacketUtil.isDispatching() || PacketUtil.consumeFastTrack(packet))
+            return false;
+        if (!blinking)
             return false;
         return offerPacket(packet);
     }

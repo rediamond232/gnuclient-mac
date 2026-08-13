@@ -4,41 +4,58 @@ import gnu.client.command.KeyNames;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ColorSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.Setting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.ClientBootstrap;
+import gnu.client.ui.ClientTheme;
 import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
 
 import java.util.List;
 
 /**
- * Hit-testing and value mutation for nested module settings. Mode settings use
- * mockup-style chip groups; after mutations, requests a config save.
+ * Compact settings panel matching the classic ClickGUI module tiles.
  */
 public final class SettingInteraction {
 
-    private static final float BOOL_H = 26f;
-    private static final float SLIDER_H = 32f;
-    private static final float BIND_H = 26f;
-    private static final float CHIP_H = 14f;
-    private static final float CHIP_PAD_X = 5f;
-    private static final float CHIP_GAP = 3f;
-    private static final float CHIP_RADIUS = 5f;
-    private static final float MODE_LABEL_H = 12f;
-    private static final float MODE_PAD_Y = 4f;
+    private static final float BOOL_H = 16f;
+    private static final float SLIDER_H = 22f;
+    private static final float BIND_H = 16f;
+    private static final float COLOR_H = 78f;
+    private static final float COLOR_SV = 46f;
+    private static final float COLOR_HUE_H = 8f;
+    private static final float CHIP_H = 12f;
+    private static final float CHIP_PAD_X = 4f;
+    private static final float CHIP_GAP = 2f;
+    private static final float CHIP_RADIUS = 3f;
+    private static final float MODE_LABEL_H = 10f;
+    private static final float MODE_PAD_Y = 2f;
+    private static final float FONT = 7f;
+    private static final float FONT_SM = 6.5f;
+    private static final float PAD = 5f;
 
     private SliderSetting dragging;
     private float dragTrackX;
     private float dragTrackW;
+    private ColorSetting draggingColor;
+    private boolean draggingHue;
+    private float colorSvX;
+    private float colorSvY;
+    private float colorSvW;
+    private float colorSvH;
+    private float colorHueX;
+    private float colorHueY;
+    private float colorHueW;
 
     public void reset() {
         dragging = null;
+        draggingColor = null;
     }
 
     public boolean isDragging() {
-        return dragging != null;
+        return dragging != null || draggingColor != null;
     }
 
     public float contentHeight(Module module) {
@@ -47,8 +64,7 @@ public final class SettingInteraction {
         }
         module.guiUpdate();
         float h = 0f;
-        // Width unknown at measure time — use column body estimate.
-        float estimateW = UiKit.COLUMN_WIDTH - 24f;
+        float estimateW = CategoryColumn.WIDTH - CategoryColumn.BODY_PAD * 2f - 8f;
         for (Setting<?> setting : module.getSettings()) {
             if (setting.isVisible()) {
                 h += settingHeight(setting, estimateW);
@@ -97,7 +113,20 @@ public final class SettingInteraction {
         return false;
     }
 
-    public void mouseDragged(int mouseX) {
+    public void mouseDragged(int mouseX, int mouseY) {
+        if (draggingColor != null) {
+            if (draggingHue) {
+                float pct = (mouseX - colorHueX) / Math.max(1f, colorHueW);
+                draggingColor.setFromPicker(UiKit.clamp01(pct), draggingColor.getSaturation(),
+                        draggingColor.getBrightness());
+            } else {
+                float s = (mouseX - colorSvX) / Math.max(1f, colorSvW);
+                float b = 1f - (mouseY - colorSvY) / Math.max(1f, colorSvH);
+                draggingColor.setFromPicker(draggingColor.getHue(), UiKit.clamp01(s), UiKit.clamp01(b));
+            }
+            ConfigManager.instance().requestSave();
+            return;
+        }
         if (dragging == null || dragTrackW <= 0f) {
             return;
         }
@@ -110,42 +139,40 @@ public final class SettingInteraction {
 
     public void mouseReleased() {
         dragging = null;
+        draggingColor = null;
     }
 
-    private boolean clickSetting(Module module, Setting<?> setting, float x, float y, float width, float height,
-            int mouseX, int mouseY, int button) {
-        if (setting.isDisabled()) {
-            // Greyed/locked — swallow the click so it can't be toggled.
-            return true;
-        }
+    private boolean clickSetting(Module module, Setting<?> setting, float x, float y, float width,
+            float height, int mouseX, int mouseY, int button) {
         if (setting instanceof BoolSetting) {
-            if (button != 0) {
+            BoolSetting bool = (BoolSetting) setting;
+            if (button != 0 || bool.isDisabled()) {
                 return true;
             }
-            BoolSetting bool = (BoolSetting) setting;
             bool.setValue(!bool.getValue());
-            module.guiUpdate();
             ConfigManager.instance().requestSave();
             return true;
         }
         if (setting instanceof ModeSetting) {
-            if (button != 0) {
-                return true;
-            }
             ModeSetting mode = (ModeSetting) setting;
             int hit = hitModeChip(mode, x, y, width, mouseX, mouseY);
             if (hit >= 0) {
                 mode.setValue(hit);
-            } else {
-                // Click on label / empty padding — cycle modes (narrow columns miss chips easily).
+                ConfigManager.instance().requestSave();
+                return true;
+            }
+            if (button == 0 || button == 1) {
                 List<String> modes = mode.getModes();
-                if (modes != null && !modes.isEmpty()) {
+                if (!modes.isEmpty()) {
                     int cur = mode.getIndex();
-                    mode.setValue((cur + 1) % modes.size());
+                    if (button == 0) {
+                        mode.setValue((cur + 1) % modes.size());
+                    } else {
+                        mode.setValue((cur - 1 + modes.size()) % modes.size());
+                    }
+                    ConfigManager.instance().requestSave();
                 }
             }
-            module.guiUpdate();
-            ConfigManager.instance().requestSave();
             return true;
         }
         if (setting instanceof SliderSetting) {
@@ -154,8 +181,8 @@ public final class SettingInteraction {
             }
             SliderSetting slider = (SliderSetting) setting;
             dragging = slider;
-            dragTrackX = x + 8f;
-            dragTrackW = Math.max(1f, width - 16f);
+            dragTrackX = x + PAD;
+            dragTrackW = Math.max(1f, width - PAD * 2f);
             float pct = (mouseX - dragTrackX) / dragTrackW;
             pct = UiKit.clamp01(pct);
             float val = slider.getMin() + pct * (slider.getMax() - slider.getMin());
@@ -163,11 +190,47 @@ public final class SettingInteraction {
             ConfigManager.instance().requestSave();
             return true;
         }
+        if (setting instanceof ColorSetting) {
+            if (button != 0) {
+                return true;
+            }
+            ColorSetting color = (ColorSetting) setting;
+            float svX = x + PAD;
+            float svY = y + 12f;
+            float svW = Math.max(8f, width - PAD * 2f);
+            float svH = COLOR_SV;
+            float hueY = svY + svH + 4f;
+            if (contains(mouseX, mouseY, svX, hueY, svW, COLOR_HUE_H)) {
+                draggingColor = color;
+                draggingHue = true;
+                colorHueX = svX;
+                colorHueY = hueY;
+                colorHueW = svW;
+                float pct = (mouseX - svX) / svW;
+                color.setFromPicker(UiKit.clamp01(pct), color.getSaturation(), color.getBrightness());
+                ConfigManager.instance().requestSave();
+                return true;
+            }
+            if (contains(mouseX, mouseY, svX, svY, svW, svH)) {
+                draggingColor = color;
+                draggingHue = false;
+                colorSvX = svX;
+                colorSvY = svY;
+                colorSvW = svW;
+                colorSvH = svH;
+                float s = (mouseX - svX) / svW;
+                float b = 1f - (mouseY - svY) / svH;
+                color.setFromPicker(color.getHue(), UiKit.clamp01(s), UiKit.clamp01(b));
+                ConfigManager.instance().requestSave();
+                return true;
+            }
+            return true;
+        }
         return true;
     }
 
     private boolean clickBind(Module module, int button) {
-        if (button == 0 || button == 2) {
+        if (button == 0) {
             ClientBootstrap.beginRebind(module.getName());
             return true;
         }
@@ -193,16 +256,53 @@ public final class SettingInteraction {
             renderSliderSetting((SliderSetting) setting, x, y, width, alpha, scale);
             return;
         }
-        float sx = UiKit.PixelAlign.snap(x + 8f, scale);
-        float sy = UiKit.PixelAlign.snap(y + (height - UiFont.height(8f)) * 0.5f, scale);
-        UiFont.draw(setting.getName(), sx, sy, 8f, UiKit.withAlpha(UiKit.MUTED, alpha));
+        if (setting instanceof ColorSetting) {
+            renderColorSetting((ColorSetting) setting, x, y, width, alpha, scale);
+            return;
+        }
+        float sx = UiKit.PixelAlign.snap(x + PAD, scale);
+        float sy = UiKit.PixelAlign.snap(y + (height - UiFont.height(FONT)) * 0.5f, scale);
+        UiFont.draw(setting.getName(), sx, sy, FONT, UiKit.withAlpha(UiKit.MUTED, alpha));
+    }
+
+    private void renderColorSetting(ColorSetting color, float x, float y, float width,
+            float alpha, float scale) {
+        float labelX = UiKit.PixelAlign.snap(x + PAD, scale);
+        float labelY = UiKit.PixelAlign.snap(y + 1f, scale);
+        UiFont.draw(color.getName(), labelX, labelY, FONT, UiKit.withAlpha(UiKit.TEXT, alpha * 0.85f));
+
+        float svX = x + PAD;
+        float svY = y + 12f;
+        float svW = Math.max(8f, width - PAD * 2f);
+        float svH = COLOR_SV;
+        int hueColor = ClientTheme.hueRgb(color.getHue());
+
+        // Soft rounded cradle, then continuous SV / hue fills (no block cells)
+        UiKit.drawRoundedPanel(svX, svY, svW, svH, 3f, UiKit.withAlpha(UiKit.PANEL_HEADER, alpha));
+        UiKit.drawSvColorField(svX, svY, svW, svH, hueColor, alpha);
+
+        float kx = svX + color.getSaturation() * svW;
+        float ky = svY + (1f - color.getBrightness()) * svH;
+        UiKit.drawRoundedPanel(kx - 2.5f, ky - 2.5f, 5f, 5f, 2.5f, UiKit.withAlpha(0xFF000000, alpha * 0.55f));
+        UiKit.drawRoundedPanel(kx - 2f, ky - 2f, 4f, 4f, 2f, UiKit.withAlpha(UiKit.TEXT, alpha));
+        UiKit.drawRoundedPanel(kx - 1f, ky - 1f, 2f, 2f, 1f,
+                UiKit.withAlpha(color.getValue() | 0xFF000000, alpha));
+
+        float hueY = svY + svH + 4f;
+        UiKit.drawRoundedPanel(svX, hueY, svW, COLOR_HUE_H, 2f, UiKit.withAlpha(UiKit.PANEL_HEADER, alpha));
+        UiKit.drawHueSpectrum(svX, hueY, svW, COLOR_HUE_H, alpha);
+        float hx = svX + color.getHue() * svW;
+        UiKit.drawRoundedPanel(hx - 1.5f, hueY - 1.5f, 3f, COLOR_HUE_H + 3f, 1.5f,
+                UiKit.withAlpha(0xFF000000, alpha * 0.45f));
+        UiKit.drawRoundedPanel(hx - 1.2f, hueY - 1f, 2.4f, COLOR_HUE_H + 2f, 1f,
+                UiKit.withAlpha(UiKit.TEXT, alpha));
     }
 
     private void renderModeSetting(ModeSetting mode, float x, float y, float width,
             float alpha, float scale) {
-        float labelX = UiKit.PixelAlign.snap(x + 8f, scale);
+        float labelX = UiKit.PixelAlign.snap(x + PAD, scale);
         float labelY = UiKit.PixelAlign.snap(y + MODE_PAD_Y, scale);
-        UiFont.draw(mode.getName(), labelX, labelY, 8f, UiKit.withAlpha(UiKit.MUTED, alpha));
+        UiFont.draw(mode.getName(), labelX, labelY, FONT, UiKit.withAlpha(UiKit.MUTED, alpha));
 
         ChipLayout layout = layoutChips(mode, x, y, width);
         List<String> modes = mode.getModes();
@@ -212,20 +312,21 @@ public final class SettingInteraction {
             float cy = layout.ys[i];
             float cw = layout.ws[i];
             boolean on = i == selected;
-            int bg = on ? 0x218B5CF6 : 0x09FFFFFF;
-            int border = on ? 0x338B5CF6 : 0x00000000;
-            int fg = on ? 0xFFD8D0FF : 0xFF777E8C;
-            UiKit.drawRoundedPanel(cx, cy, cw, CHIP_H, CHIP_RADIUS, UiKit.withAlpha(bg, alpha));
             if (on) {
-                // Soft selected border via inset darker rim
-                UiKit.drawRoundedPanel(cx, cy, cw, 1f, 0f, UiKit.withAlpha(border, alpha));
+                UiKit.drawGlowRect(cx, cy, cw, CHIP_H, CHIP_RADIUS, ClientTheme.color1(), 0.35f * alpha);
+                int top = ClientTheme.withAlpha(ClientTheme.lighten(ClientTheme.color1(), 0.12f), alpha);
+                int bot = ClientTheme.withAlpha(ClientTheme.color2(), alpha);
+                UiKit.drawVerticalGradient(cx, cy, cw, CHIP_H, top, bot);
+            } else {
+                UiKit.drawRoundedPanel(cx, cy, cw, CHIP_H, CHIP_RADIUS,
+                        UiKit.withAlpha(UiKit.ROW_IDLE, alpha));
             }
             String label = modes.get(i);
-            float tw = UiFont.width(label, 7f);
+            float tw = UiFont.width(label, FONT_SM);
             UiFont.draw(label,
                     UiKit.PixelAlign.snap(cx + (cw - tw) * 0.5f, scale),
-                    UiKit.PixelAlign.snap(cy + (CHIP_H - UiFont.height(7f)) * 0.5f, scale),
-                    7f, UiKit.withAlpha(fg, alpha));
+                    UiKit.PixelAlign.snap(cy + (CHIP_H - UiFont.height(FONT_SM)) * 0.5f, scale),
+                    FONT_SM, UiKit.withAlpha(on ? UiKit.TEXT : UiKit.MUTED_DIM, alpha));
         }
     }
 
@@ -233,62 +334,70 @@ public final class SettingInteraction {
             float alpha, float scale) {
         boolean locked = bool.isDisabled();
         int labelColor = locked ? UiKit.MUTED_DIM : UiKit.MUTED;
-        float sx = UiKit.PixelAlign.snap(x + 8f, scale);
-        float sy = UiKit.PixelAlign.snap(y + (BOOL_H - UiFont.height(8f)) * 0.5f, scale);
-        UiFont.draw(bool.getName(), sx, sy, 8f, UiKit.withAlpha(labelColor, alpha));
+        float sx = UiKit.PixelAlign.snap(x + PAD, scale);
+        float sy = UiKit.PixelAlign.snap(y + (BOOL_H - UiFont.height(FONT)) * 0.5f, scale);
+        UiFont.draw(bool.getName(), sx, sy, FONT, UiKit.withAlpha(labelColor, alpha));
 
-        float tw = 22f;
-        float th = 12f;
-        float tx = x + width - 8f - tw;
+        float tw = 18f;
+        float th = 10f;
+        float tx = x + width - PAD - tw;
         float ty = y + (BOOL_H - th) * 0.5f;
         boolean on = bool.isToggled();
-        int track = locked ? 0xFF2A2F3A : (on ? 0xFF7655DF : 0xFF333846);
-        int knob = locked ? 0xFF5A606E : (on ? 0xFFFFFFFF : 0xFFA8ADBA);
-        UiKit.drawRoundedPanel(tx, ty, tw, th, th * 0.5f, UiKit.withAlpha(track, alpha));
-        float kw = 8f;
-        float kx = on ? tx + tw - kw - 2f : tx + 2f;
+        if (on && !locked) {
+            UiKit.drawGlowRect(tx, ty, tw, th, th * 0.5f, ClientTheme.color1(), 0.35f * alpha);
+            UiKit.drawVerticalGradient(tx, ty, tw, th,
+                    ClientTheme.withAlpha(ClientTheme.lighten(ClientTheme.color1(), 0.1f), alpha),
+                    ClientTheme.withAlpha(ClientTheme.color2(), alpha));
+        } else {
+            UiKit.drawRoundedPanel(tx, ty, tw, th, th * 0.5f,
+                    UiKit.withAlpha(locked ? UiKit.TRACK : UiKit.TRACK_DIM, alpha));
+        }
+        float kw = 7f;
+        float kx = on ? tx + tw - kw - 1.5f : tx + 1.5f;
         float ky = ty + (th - kw) * 0.5f;
+        int knob = locked ? UiKit.MUTED_DIM : (on ? UiKit.TEXT : 0xFFA8ADBA);
         UiKit.drawRoundedPanel(kx, ky, kw, kw, kw * 0.5f, UiKit.withAlpha(knob, alpha));
     }
 
     private void renderSliderSetting(SliderSetting slider, float x, float y, float width,
             float alpha, float scale) {
-        float sx = UiKit.PixelAlign.snap(x + 8f, scale);
-        float sy = UiKit.PixelAlign.snap(y + 4f, scale);
-        UiFont.draw(slider.getName(), sx, sy, 8f, UiKit.withAlpha(UiKit.MUTED, alpha));
+        float sx = UiKit.PixelAlign.snap(x + PAD, scale);
+        float sy = UiKit.PixelAlign.snap(y + 2f, scale);
+        UiFont.draw(slider.getName(), sx, sy, FONT, UiKit.withAlpha(UiKit.MUTED, alpha));
 
         String value = String.format("%.2f", slider.getValue());
-        float vw = UiFont.width(value, 8f);
-        UiFont.draw(value, UiKit.PixelAlign.snap(x + width - 8f - vw, scale), sy, 8f,
-                UiKit.withAlpha(0xFFC4B5FD, alpha));
+        float vw = UiFont.width(value, FONT_SM);
+        UiFont.draw(value, UiKit.PixelAlign.snap(x + width - PAD - vw, scale), sy, FONT_SM,
+                UiKit.withAlpha(ClientTheme.lerp(0.5f), alpha));
 
-        float trackX = x + 8f;
-        float trackW = width - 16f;
-        float trackY = y + SLIDER_H - 10f;
+        float trackX = x + PAD;
+        float trackW = width - PAD * 2f;
+        float trackY = y + SLIDER_H - 7f;
         float range = slider.getMax() - slider.getMin();
         float pct = range <= 0f ? 0f : (slider.getValue() - slider.getMin()) / range;
         pct = UiKit.clamp01(pct);
-        UiKit.drawRoundedPanel(trackX, trackY, trackW, 3f, 2f,
-                UiKit.withAlpha(0xFF303543, alpha));
-        UiKit.drawRoundedPanel(trackX, trackY, Math.max(3f, trackW * pct), 3f, 2f,
-                UiKit.withAlpha(UiKit.ACCENT, alpha));
-        float knob = 9f;
+        UiKit.drawRoundedPanel(trackX, trackY, trackW, 2.5f, 2f,
+                UiKit.withAlpha(UiKit.TRACK, alpha));
+        float fillW = Math.max(2.5f, trackW * pct);
+        UiKit.drawHorizontalGradient(trackX, trackY, fillW, 2.5f,
+                ClientTheme.withAlpha(ClientTheme.color1(), alpha),
+                ClientTheme.withAlpha(ClientTheme.color2(), alpha));
+        float knob = 7f;
         float kx = trackX + trackW * pct - knob * 0.5f;
-        float ky = trackY + 1.5f - knob * 0.5f;
+        float ky = trackY + 1.25f - knob * 0.5f;
+        UiKit.drawGlowRect(kx, ky, knob, knob, knob * 0.5f, ClientTheme.color2(), 0.3f * alpha);
         UiKit.drawRoundedPanel(kx, ky, knob, knob, knob * 0.5f,
-                UiKit.withAlpha(UiKit.ACCENT, alpha));
-        UiKit.drawRoundedPanel(kx + 1.5f, ky + 1.5f, knob - 3f, knob - 3f, (knob - 3f) * 0.5f,
-                UiKit.withAlpha(0xFFF5F3FF, alpha));
+                UiKit.withAlpha(UiKit.TEXT, alpha));
     }
 
     private void renderBindRow(Module module, float x, float y, float width,
             float alpha, float scale) {
-        float sx = UiKit.PixelAlign.snap(x + 8f, scale);
-        float sy = UiKit.PixelAlign.snap(y + (BIND_H - UiFont.height(8f)) * 0.5f, scale);
+        float sx = UiKit.PixelAlign.snap(x + PAD, scale);
+        float sy = UiKit.PixelAlign.snap(y + (BIND_H - UiFont.height(FONT)) * 0.5f, scale);
         boolean listening = ClientBootstrap.rebindModuleName() != null
                 && ClientBootstrap.rebindModuleName().equalsIgnoreCase(module.getName());
-        int color = UiKit.withAlpha(listening ? 0xFFFFFF55 : 0xFF88CCFF, alpha);
-        UiFont.draw(bindLabel(module), sx, sy, 8f, color);
+        int color = UiKit.withAlpha(listening ? UiKit.WARN : ClientTheme.lerp(0.4f), alpha);
+        UiFont.draw(bindLabel(module), sx, sy, FONT, color);
     }
 
     private static String bindLabel(Module module) {
@@ -310,6 +419,9 @@ public final class SettingInteraction {
         if (setting instanceof SliderSetting) {
             return SLIDER_H;
         }
+        if (setting instanceof ColorSetting) {
+            return COLOR_H;
+        }
         return BOOL_H;
     }
 
@@ -322,7 +434,6 @@ public final class SettingInteraction {
         for (int i = 0; i < layout.count; i++) {
             bottom = Math.max(bottom, layout.ys[i] + CHIP_H);
         }
-        // layout ys are relative to y=0
         return Math.max(BOOL_H, bottom + MODE_PAD_Y);
     }
 
@@ -337,10 +448,6 @@ public final class SettingInteraction {
         return -1;
     }
 
-    /**
-     * Prefer chips on the same row as the label (right-aligned). If they do not
-     * fit, wrap onto following rows under the label.
-     */
     private static ChipLayout layoutChips(ModeSetting mode, float x, float y, float width) {
         List<String> modes = mode.getModes();
         int n = modes == null ? 0 : modes.size();
@@ -352,21 +459,20 @@ public final class SettingInteraction {
         float[] chipW = new float[n];
         float total = 0f;
         for (int i = 0; i < n; i++) {
-            chipW[i] = UiFont.width(modes.get(i), 7f) + CHIP_PAD_X * 2f;
+            chipW[i] = UiFont.width(modes.get(i), FONT_SM) + CHIP_PAD_X * 2f;
             total += chipW[i];
             if (i > 0) {
                 total += CHIP_GAP;
             }
         }
 
-        float labelW = UiFont.width(mode.getName(), 8f) + 12f;
-        float innerL = x + 8f;
-        float innerR = x + width - 8f;
-        float availSameRow = innerR - innerL - labelW - 6f;
+        float labelW = UiFont.width(mode.getName(), FONT) + 8f;
+        float innerL = x + PAD;
+        float innerR = x + width - PAD;
+        float availSameRow = innerR - innerL - labelW - 4f;
         float chipY0 = y + MODE_PAD_Y + (MODE_LABEL_H - CHIP_H) * 0.5f;
 
-        if (total <= availSameRow && availSameRow > 20f) {
-            // Right-align on the label row
+        if (total <= availSameRow && availSameRow > 16f) {
             float cx = innerR - total;
             for (int i = 0; i < n; i++) {
                 out.xs[i] = cx;
@@ -378,7 +484,6 @@ public final class SettingInteraction {
             return out;
         }
 
-        // Wrap under the label
         float rowY = y + MODE_PAD_Y + MODE_LABEL_H + 2f;
         float cx = innerL;
         float rowRight = innerR;

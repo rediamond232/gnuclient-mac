@@ -452,4 +452,9 @@ public final class WTapModule extends Module implements PacketListener {
             return true;
         return food.getFoodLevel() > 6;
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { mode.getCurrentMode() };
+    }
 }

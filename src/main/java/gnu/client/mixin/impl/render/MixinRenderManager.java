@@ -1,6 +1,7 @@
 package gnu.client.mixin.impl.render;
 
 import gnu.client.runtime.RotationState;
+import gnu.client.render.shaders.ShaderEngine;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.renderer.entity.RenderManager;
 import net.minecraft.entity.Entity;
@@ -15,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * OpenMyau {@code MixinRenderManager} — while silent rotations are active, swap
  * the local player's body/head/pitch to the server look for the duration of
- * {@code renderEntityStatic} so F5 / FreeLook show KillAura/Scaffold aim.
+ * {@code renderEntityStatic} so F5 / FreeLook show silent combat aim.
  */
 @SideOnly(Side.CLIENT)
 @Mixin(value = RenderManager.class, priority = 9999)
@@ -40,6 +41,7 @@ public abstract class MixinRenderManager {
     private void gnu$silentRotPre(Entity entity, float partialTicks, boolean hideDebugBox,
                                   CallbackInfoReturnable<Boolean> cir) {
         gnu$swapped = false;
+        ShaderEngine.INSTANCE.bindEntities();
         if (!(entity instanceof EntityPlayerSP) || !RotationState.isRotated(1))
             return;
         EntityPlayerSP player = (EntityPlayerSP) entity;

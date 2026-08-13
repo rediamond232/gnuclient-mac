@@ -2,8 +2,10 @@ package gnu.client.runtime;
 
 import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.DisplaceModule;
+import gnu.client.module.modules.combat.KeepSprintModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
+import gnu.client.module.modules.player.NoSlowModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -40,9 +42,10 @@ public final class PlayerUpdateHook {
 
         clearRotationOverride();
         StasisModule.onPreUpdate(player);
-        ScaffoldModule.onPreUpdate(player);
         DisplaceModule.onPreUpdate(player);
+        KeepSprintModule.maintainWalkState();
         KillAuraModule.onPreUpdate(player);
+        ScaffoldModule.onPreUpdate(player);
         return false;
     }
 
@@ -79,12 +82,14 @@ public final class PlayerUpdateHook {
     public static void beforeWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;
+        NoSlowModule.onGrimPreMovement();
+        // Do NOT KeepSprint.applyStop here — living already ran. Clearing sprint after
+        // sprint motion produces ground Simulation ~0.030 (walk packet vs sprint move).
         KillAuraModule.onBeforeWalkingPrepare(player);
         KillAuraModule.onBeforeWalkingAttack(player);
-        // Scaffold last: C09+C08 then C03 with place look (1.8 Grim Post / RotationPlace queue).
-        ScaffoldModule.onBeforeWalkingPlace(player);
         if (overrideActive)
             beginRotationSwap(player);
+        ScaffoldModule.onBeforeWalkingPlayer(player);
     }
 
     /** True between {@link #beginRotationSwap} and {@code onUpdate} return — rotation sent/will send this tick. */
@@ -100,6 +105,7 @@ public final class PlayerUpdateHook {
     public static void onAfterWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;
+        KeepSprintModule.onAfterWalking();
         KillAuraModule.onAfterWalking(player);
     }
 

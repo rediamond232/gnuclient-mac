@@ -5,10 +5,11 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.player.NoSlowModule;
-import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.BlinkManager;
 import gnu.client.runtime.BlinkModules;
+import gnu.client.runtime.PlayerStateManager;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.runtime.packet.PacketHelper;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.PlayerControllerMP;
 import net.minecraft.entity.EntityLivingBase;
@@ -37,6 +38,35 @@ public final class KillAuraAutoBlock {
     public static final int LEGIT = 7;
     public static final int FAKE = 8;
     public static final int GRIM = 9;
+    public static final int WATCHDOG2 = 10;
+    public static final int HYPIXEL3 = 11;
+
+    /** Reference performAttack: modes that may attack while sword-blocking. */
+    public static boolean isAttackAllowedWhileBlocking(int mode) {
+        return mode == VANILLA || mode == GRIM || mode == WATCHDOG2 || mode == HYPIXEL3;
+    }
+
+    /** Reference shouldAutoBlock mode membership (water/lava checked at call site). */
+    public static boolean isShouldAutoBlockMode(int mode) {
+        return mode == HYPIXEL
+            || mode == BLINK
+            || mode == INTERACT
+            || mode == SWAP
+            || mode == LEGIT
+            || mode == GRIM
+            || mode == WATCHDOG2
+            || mode == HYPIXEL3;
+    }
+
+    /** Grim phase captured at {@link #tick} entry before the switch mutates {@code grimState}. */
+    public int getPreTickGrimPhase() {
+        return preGrimPhase;
+    }
+
+    /** {@code ctx.attackEligible} at {@link #tick} entry before attack is mutated. */
+    public boolean getPreTickGrimAttackAllowed() {
+        return preMutationAttackAllowed;
+    }
 
     private final Random random = new Random();
 
@@ -46,7 +76,12 @@ public final class KillAuraAutoBlock {
     private int blockTick;
     private boolean blinkReset;
     private int grimState;
+    private int preGrimPhase = -1;
+    private boolean preMutationAttackAllowed;
     private int grimReleaseTick;
+    private int hypixel3Asw;
+    private long watchdog2BlockDelayMs = 166L;
+    private long watchdog2BlockStartMs;
     private int lastMode = NONE;
 
     /** Inputs for one KillAura preUpdate combat tick. */
@@ -58,12 +93,10 @@ public final class KillAuraAutoBlock {
         public boolean attackEligible;
         /** Sword held and optional use-key press. */
         public boolean canAutoBlock;
-        /** User is physically holding RMB/use item; used to avoid fighting manual block. */
-        public boolean manualUseKeyDown;
-        /** KillAura AutoBlockRequirePress setting. */
-        public boolean requirePress;
         public int grimReleaseDelay;
         public long attackDelayMs;
+        /** Single AutoBlockCPS from KillAura settings. */
+        public float autoBlockCps;
         public float yaw;
         public float pitch;
         /** Current KA target for interactAttack; may be null. */
@@ -85,8 +118,13 @@ public final class KillAuraAutoBlock {
         setAutoBlockBlink(false);
         blinkReset = false;
         blockTick = 0;
+        hypixel3Asw = 0;
         grimState = 0;
         grimReleaseTick = 0;
+        preGrimPhase = -1;
+        preMutationAttackAllowed = false;
+        watchdog2BlockDelayMs = 166L;
+        watchdog2BlockStartMs = 0L;
         isBlocking = false;
         fakeBlockState = false;
         if (blockingState || isPlayerBlocking())
@@ -108,43 +146,30 @@ public final class KillAuraAutoBlock {
      * Call each KA preUpdate when KA has combat context (enabled / target path).
      * Mirrors OpenMyau PRE auto-block switch; does not perform the attack itself.
      */
-    /**
-     * When AutoBlockRequirePress is off, KillAura may auto-block without the user
-     * holding RMB. If the user then manually holds block, do not auto-release it
-     * just because the attack tick ended; that creates Grim PacketOrderI release
-     * failures while the client/server still has rightClicking=true.
-     */
-    static boolean shouldKeepBlockingForManualUse(Context ctx) {
-        return ctx != null
-            && ctx.mode != NONE
-            && ctx.canAutoBlock
-            && !ctx.requirePress
-            && ctx.manualUseKeyDown;
-    }
-
     public TickResult tick(Context ctx) {
         TickResult result = new TickResult();
         if (ctx == null) {
             result.attackAllowed = false;
             return result;
         }
+        preGrimPhase = (ctx.mode == GRIM) ? grimState : -1;
+        preMutationAttackAllowed = ctx.attackEligible;
         lastMode = ctx.mode;
         boolean attack = ctx.attackEligible;
         boolean block = attack && ctx.canAutoBlock;
-        if (!block) {
-            if (shouldKeepBlockingForManualUse(ctx)) {
-                setAutoBlockBlink(false);
-                isBlocking = true;
-                fakeBlockState = false;
-                blockTick = 0;
-            } else {
-                setAutoBlockBlink(false);
-                isBlocking = false;
-                fakeBlockState = false;
-                blockTick = 0;
-                if (blockingState || isPlayerBlocking())
-                    stopBlock();
-            }
+        // FAKE is visual-only: keep pose whenever sword + AB-range target exist,
+        // even if attackEligible is false (delay / gates). Other modes still
+        // clear fakeBlockState when the real block session is inactive.
+        if (ctx.mode == FAKE) {
+            setAutoBlockBlink(false);
+            isBlocking = false;
+            fakeBlockState = ctx.canAutoBlock && ctx.hasValidTarget;
+            blockTick = 0;
+        } else if (!block) {
+            setAutoBlockBlink(false);
+            isBlocking = false;
+            fakeBlockState = false;
+            blockTick = 0;
         }
         result.attackAllowed = attack;
         result.swap = false;
@@ -161,7 +186,7 @@ public final class KillAuraAutoBlock {
             boolean placing = isPlacing();
             switch (ctx.mode) {
                 case NONE:
-                    if (isUseKeyDown()) {
+                    if (Mc.isUsingItem()) {
                         isBlocking = true;
                         if (!isPlayerBlocking() && !digging && !placing)
                             swap = true;
@@ -305,7 +330,6 @@ public final class KillAuraAutoBlock {
                                         int slot = findEmptySlot(item);
                                         Mc.sendHeldItemChange(slot);
                                         setCurrentPlayerItem(slot);
-                                        clearBlockAfterSlotChange(player);
                                         attack = false;
                                     }
                                     if (ctx.attackDelayMs <= 50L)
@@ -401,10 +425,8 @@ public final class KillAuraAutoBlock {
                     }
                     break;
                 case FAKE:
-                    setAutoBlockBlink(false);
-                    isBlocking = false;
-                    fakeBlockState = ctx.hasValidTarget;
-                    if (isUseKeyDown() && !isPlayerBlocking() && !digging && !placing)
+                    // State already applied above (visual-only; independent of attackEligible).
+                    if (Mc.isUsingItem() && !isPlayerBlocking() && !digging && !placing)
                         swap = true;
                     break;
                 case GRIM:
@@ -419,7 +441,7 @@ public final class KillAuraAutoBlock {
                             case 1:
                                 if (!digging && !placing && !isPlayerBlocking()) {
                                     NoSlowModule noSlow = NoSlowModule.instance();
-                                    if (noSlow == null || !noSlow.isEnabled() || !noSlow.isGrimMode()) {
+                                    if (noSlow == null || !noSlow.isEnabled() || !noSlow.isSwordGrimActive()) {
                                         EntityPlayerSP player = Mc.player();
                                         if (player != null)
                                             Mc.sendHeldItemChange(grimSwapSlot(player.inventory.currentItem));
@@ -464,6 +486,93 @@ public final class KillAuraAutoBlock {
                         grimReleaseTick = 0;
                     }
                     break;
+                case WATCHDOG2:
+                    if (ctx.hasValidTarget) {
+                        if (!digging && !placing) {
+                            switch (blockTick) {
+                                case 0:
+                                    attack = false;
+                                    if (!isPlayerBlocking())
+                                        swap = true;
+                                    watchdog2BlockDelayMs = watchdog2HoldDelayMs(ctx.autoBlockCps);
+                                    watchdog2BlockStartMs = System.currentTimeMillis();
+                                    blockTick = 1;
+                                    break;
+                                case 1:
+                                    attack = false;
+                                    if (isPlayerBlocking()
+                                            && System.currentTimeMillis() - watchdog2BlockStartMs
+                                            >= watchdog2BlockDelayMs) {
+                                        stopBlock();
+                                        blockTick = 2;
+                                    }
+                                    break;
+                                case 2:
+                                    attack = false;
+                                    if (ctx.attackDelayMs <= 0L)
+                                        blockTick = 3;
+                                    break;
+                                case 3:
+                                    attack = true;
+                                    isBlocking = false;
+                                    fakeBlockState = false;
+                                    break;
+                                default:
+                                    blockTick = 0;
+                            }
+                        }
+                        setAutoBlockBlink(false);
+                        if (blockTick != 3) {
+                            isBlocking = true;
+                            fakeBlockState = false;
+                        }
+                    } else {
+                        if (isPlayerBlocking())
+                            stopBlock();
+                        setAutoBlockBlink(false);
+                        isBlocking = false;
+                        fakeBlockState = false;
+                        blockTick = 0;
+                    }
+                    break;
+                case HYPIXEL3:
+                    if (ctx.hasValidTarget) {
+                        setAutoBlockBlink(true);
+                        if (!digging && !placing) {
+                            switch (hypixel3Asw) {
+                                case 0:
+                                    if (isPlayerBlocking())
+                                        stopBlock();
+                                    attack = false;
+                                    hypixel3Asw = 1;
+                                    break;
+                                case 1:
+                                    if (isPlayerBlocking())
+                                        stopBlock();
+                                    attack = false;
+                                    hypixel3Asw = 2;
+                                    break;
+                                case 2:
+                                    if (!isPlayerBlocking())
+                                        swap = true;
+                                    blocked = true;
+                                    hypixel3Asw = 0;
+                                    break;
+                                default:
+                                    hypixel3Asw = 0;
+                            }
+                        } else {
+                            attack = false;
+                        }
+                        isBlocking = true;
+                        fakeBlockState = true;
+                    } else {
+                        setAutoBlockBlink(false);
+                        isBlocking = false;
+                        fakeBlockState = false;
+                        hypixel3Asw = 0;
+                    }
+                    break;
                 default:
                     setAutoBlockBlink(false);
                     isBlocking = false;
@@ -497,6 +606,36 @@ public final class KillAuraAutoBlock {
         }
     }
 
+    /** wsamiaw onPacket: C07 release / C09 slot change clear blockingState. */
+    public void onOutboundPacket(Object packet) {
+        if (PacketHelper.isReleaseUseItem(packet)) {
+            blockingState = false;
+            return;
+        }
+        if (PacketHelper.isHeldItemChange(packet) && lastMode != GRIM) {
+            blockingState = false;
+            if (isBlocking) {
+                EntityPlayerSP player = Mc.player();
+                if (player != null)
+                    player.stopUsingItem();
+            }
+        }
+    }
+
+    public void notifyAttackSucceeded() {
+        if (lastMode == WATCHDOG2)
+            blockTick = 0;
+    }
+
+    public boolean shouldAutoBlock() {
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return false;
+        if (player.isInWater() || player.isInLava())
+            return false;
+        return isPlayerBlocking() && isBlocking && isShouldAutoBlockMode(lastMode);
+    }
+
     public boolean isPlayerBlocking() {
         EntityPlayerSP player = Mc.player();
         return player != null
@@ -512,15 +651,21 @@ public final class KillAuraAutoBlock {
         return fakeBlockState && Mc.isHoldingSword();
     }
 
-    /** OpenMyau performAttack: skip when blocking and mode is not VANILLA. */
+    /** Reference performAttack: skip when blocking unless mode allows it. */
     public boolean shouldDeferAttack() {
-        return isPlayerBlocking() && lastMode != VANILLA;
+        return isPlayerBlocking() && !isAttackAllowedWhileBlocking(lastMode);
     }
 
     public long attackDelayMsWhenBlocking(float autoBlockCps) {
         if (autoBlockCps <= 0.0f)
             return 1000L;
         return (long) (1000.0f / autoBlockCps);
+    }
+
+    static long watchdog2HoldDelayMs(float autoBlockCps) {
+        if (autoBlockCps <= 0.0f)
+            return 166L;
+        return (long) (1000.0 / autoBlockCps);
     }
 
     private void startBlock(ItemStack stack) {
@@ -549,9 +694,11 @@ public final class KillAuraAutoBlock {
     }
 
     private void sendUseItem() {
-        PlayerControllerMP controller = Mc.controller();
-        if (controller instanceof IAccessorPlayerControllerMP)
-            ((IAccessorPlayerControllerMP) controller).invokeSyncCurrentPlayItem();
+        if (lastMode != GRIM) {
+            PlayerControllerMP controller = Mc.controller();
+            if (controller instanceof IAccessorPlayerControllerMP)
+                ((IAccessorPlayerControllerMP) controller).invokeSyncCurrentPlayItem();
+        }
         EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
@@ -644,20 +791,11 @@ public final class KillAuraAutoBlock {
     }
 
     private static boolean isDigging() {
-        PlayerControllerMP controller = Mc.controller();
-        return controller instanceof IAccessorPlayerControllerMP
-                && ((IAccessorPlayerControllerMP) controller).getIsHittingBlock();
+        return PlayerStateManager.INSTANCE.digging;
     }
 
     private static boolean isPlacing() {
-        Module module = ModuleManager.INSTANCE.getModule("Scaffold");
-        return module instanceof ScaffoldModule && module.isEnabled();
-    }
-
-    private static boolean isUseKeyDown() {
-        return Mc.mc() != null
-                && Mc.mc().currentScreen == null
-                && Mc.isUseItemKeyDown();
+        return PlayerStateManager.INSTANCE.placing;
     }
 
     private static int currentPlayerItem() {

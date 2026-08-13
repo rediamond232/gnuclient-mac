@@ -206,4 +206,9 @@ public final class FastStopModule extends Module {
         holdLeftTicks = 0;
         holdRightTicks = 0;
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { mode.getCurrentMode() };
+    }
 }

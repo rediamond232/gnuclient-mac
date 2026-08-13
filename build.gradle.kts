@@ -1,4 +1,5 @@
 import org.apache.commons.lang3.SystemUtils
+import java.util.zip.ZipFile
 
 plugins {
     idea
@@ -59,6 +60,7 @@ dependencies {
     minecraft("com.mojang:minecraft:1.8.9")
     mappings("de.oceanlabs.mcp:mcp_stable:22-1.8.9")
     forge("net.minecraftforge:forge:1.8.9-11.15.1.2318-1.8.9")
+    shadowImpl(files("libs/viaforgeplus-2.2.jar"))
     shadowImpl("org.spongepowered:mixin:0.7.11-SNAPSHOT") {
         isTransitive = false
         exclude(module = "gson")
@@ -85,7 +87,9 @@ tasks.withType(org.gradle.jvm.tasks.Jar::class) {
         this["FMLCorePluginContainsFMLMod"] = "true"
         this["ForceLoadAsMod"] = "true"
         this["TweakClass"] = "org.spongepowered.asm.launch.MixinTweaker"
-        this["MixinConfigs"] = "mixins.gnuclient.json"
+        this["MixinConfigs"] = "mixins.gnuclient.json,mixins.viaforgeplus.json"
+        this["FMLCorePlugin"] = "net.aspw.viaforgeplus.mixin.MixinLoader"
+        this["FMLAT"] = "viaforgeplus_at.cfg"
     }
 }
 
@@ -96,6 +100,32 @@ tasks.processResources {
     inputs.property("basePackage", baseGroup)
     filesMatching(listOf("mcmod.info", "mixins.gnuclient.json")) {
         expand(inputs.properties)
+    }
+
+    doLast {
+        val vfpJar = file("libs/viaforgeplus-2.2.jar")
+        if (!vfpJar.exists()) return@doLast
+        val outputDir = sourceSets.main.get().output.resourcesDir ?: return@doLast
+        val mcmodFile = File(outputDir, "mcmod.info")
+        if (!mcmodFile.exists()) return@doLast
+
+        try {
+            val vfpJson = ZipFile(vfpJar).use { zip ->
+                zip.getInputStream(zip.getEntry("mcmod.info")).bufferedReader().readText().trim()
+            }
+            val gnuJson = mcmodFile.readText().trim()
+            // Both are JSON arrays: [{...}]  -> strip brackets and join
+            val merged = if (gnuJson.startsWith("[") && gnuJson.endsWith("]") &&
+                vfpJson.startsWith("[") && vfpJson.endsWith("]")) {
+                "[" + gnuJson.substring(1, gnuJson.length - 1) + "," +
+                    vfpJson.substring(1, vfpJson.length - 1) + "]"
+            } else {
+                gnuJson
+            }
+            mcmodFile.writeText(merged)
+        } catch (e: Exception) {
+            logger.warn("Failed to merge mcmod.info from ViaForgePlus: ${e.message}")
+        }
     }
 }
 

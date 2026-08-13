@@ -19,7 +19,7 @@ import gnu.client.runtime.packet.PacketListener;
  * <p>Grim RotationPlace: sword RMB while the crosshair is on a block also sends a
  * real face {@code C08} (interact/place) before the use-item {@code C08} (dir=255).
  * Silent KillAura C03 look aims at the target, not that block → pre/post-flying.
- * Cancel non-use-item C08 while KA is on, holding a sword, and Scaffold is off.
+ * Cancel non-use-item C08 while KA is on and holding a sword.
  *
  * <p>Registered while KillAura is enabled. {@link gnu.client.runtime.mc.Mc#sendSprintActionPacket}
  * peeks via {@link #shouldCancelEntityAction} (read-only); only {@link #onSend} commits the
@@ -96,12 +96,7 @@ public final class AuraCombatPacketGuard implements PacketListener {
     }
 
     private static boolean shouldCancelSwordBlockInteract(Object packet) {
-        if (!PacketHelper.isBlockInteractOrPlace(packet))
-            return false;
-        if (!Mc.isHoldingSword())
-            return false;
-        Module scaffold = ModuleManager.instance().getModule("Scaffold");
-        return !(scaffold != null && scaffold.isEnabled());
+        return false;
     }
 
     @Override
@@ -121,6 +116,19 @@ public final class AuraCombatPacketGuard implements PacketListener {
         // One sprint C0B per move (BadPacketsX). No post-hit START suppress —
         // OpenMyau lets living re-sprint after attack slow.
         return sprintActionSinceMove;
+    }
+
+    /**
+     * Mark the sprint C0B slot without sending — for KeepSprint STOP sent via
+     * {@code sendPacketNoEvent} so BadPacketsX stays in sync with Grim.
+     */
+    public static void markSprintActionSent() {
+        if (isGuardActive())
+            INSTANCE.sprintActionSinceMove = true;
+    }
+
+    public static boolean isSprintSlotFree() {
+        return !isGuardActive() || !INSTANCE.sprintActionSinceMove;
     }
 
     private boolean checkEntityAction(Object packet) {

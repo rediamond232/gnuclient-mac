@@ -2,53 +2,60 @@ package gnu.client.module.modules.combat.killaura;
 
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class KillAuraAutoBlockTest {
 
     @Test
-    public void keepsManualBlockOnlyWhenAutoBlockRequirePressIsOff() {
-        KillAuraAutoBlock.Context ctx = context(KillAuraAutoBlock.INTERACT, true, false, true);
-
-        assertTrue(KillAuraAutoBlock.shouldKeepBlockingForManualUse(ctx));
+    public void fakeModeIndexIsEight() {
+        assertEquals(8, KillAuraAutoBlock.FAKE);
     }
 
     @Test
-    public void doesNotKeepManualBlockWhenAutoBlockRequirePressIsOn() {
-        KillAuraAutoBlock.Context ctx = context(KillAuraAutoBlock.INTERACT, true, true, true);
-
-        assertFalse(KillAuraAutoBlock.shouldKeepBlockingForManualUse(ctx));
+    public void watchdog2AndHypixel3ModeIndicesMatchReference() {
+        assertEquals(10, KillAuraAutoBlock.WATCHDOG2);
+        assertEquals(11, KillAuraAutoBlock.HYPIXEL3);
     }
 
     @Test
-    public void doesNotKeepManualBlockWithoutAutoBlockMode() {
-        KillAuraAutoBlock.Context ctx = context(KillAuraAutoBlock.NONE, true, false, true);
+    public void attackWhileBlockingAllowedOnlyForVanillaGrimWatchdog2Hypixel3() {
+        assertTrue(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.VANILLA));
+        assertTrue(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.GRIM));
+        assertTrue(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.WATCHDOG2));
+        assertTrue(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.HYPIXEL3));
 
-        assertFalse(KillAuraAutoBlock.shouldKeepBlockingForManualUse(ctx));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.NONE));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.SPOOF));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.HYPIXEL));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.BLINK));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.INTERACT));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.SWAP));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.LEGIT));
+        assertFalse(KillAuraAutoBlock.isAttackAllowedWhileBlocking(KillAuraAutoBlock.FAKE));
     }
 
     @Test
-    public void doesNotKeepManualBlockWithoutSword() {
-        KillAuraAutoBlock.Context ctx = context(KillAuraAutoBlock.INTERACT, false, false, true);
+    public void shouldAutoBlockModesMatchReference() {
+        assertFalse(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.NONE));
+        assertFalse(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.VANILLA));
+        assertFalse(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.SPOOF));
+        assertFalse(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.FAKE));
 
-        assertFalse(KillAuraAutoBlock.shouldKeepBlockingForManualUse(ctx));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.HYPIXEL));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.BLINK));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.INTERACT));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.SWAP));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.LEGIT));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.GRIM));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.WATCHDOG2));
+        assertTrue(KillAuraAutoBlock.isShouldAutoBlockMode(KillAuraAutoBlock.HYPIXEL3));
     }
 
     @Test
-    public void doesNotKeepManualBlockWhenUseKeyIsNotDown() {
-        KillAuraAutoBlock.Context ctx = context(KillAuraAutoBlock.INTERACT, true, false, false);
-
-        assertFalse(KillAuraAutoBlock.shouldKeepBlockingForManualUse(ctx));
-    }
-
-    private static KillAuraAutoBlock.Context context(int mode, boolean canAutoBlock,
-                                                     boolean requirePress, boolean manualUseKeyDown) {
-        KillAuraAutoBlock.Context ctx = new KillAuraAutoBlock.Context();
-        ctx.mode = mode;
-        ctx.canAutoBlock = canAutoBlock;
-        ctx.requirePress = requirePress;
-        ctx.manualUseKeyDown = manualUseKeyDown;
-        return ctx;
+    public void watchdog2HoldDelayUsesAutoBlockCps() {
+        assertEquals(125L, KillAuraAutoBlock.watchdog2HoldDelayMs(8.0f));
+        assertEquals(166L, KillAuraAutoBlock.watchdog2HoldDelayMs(0.0f));
     }
 }

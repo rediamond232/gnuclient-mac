@@ -8,6 +8,7 @@ import gnu.client.mixin.impl.accessors.IAccessorTimer;
 import gnu.client.module.modules.combat.AntiBotModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.runtime.AuraCombatPacketGuard;
+import gnu.client.runtime.BlinkManager;
 import gnu.client.runtime.ClientBootstrap;
 import gnu.client.runtime.packet.PacketUtil;
 import net.minecraft.block.Block;
@@ -15,7 +16,7 @@ import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.FontRenderer;
-import net.minecraft.client.gui.GuiMainMenu;
+import gnu.client.ui.menu.GnuMainMenuScreen;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.gui.inventory.GuiContainer;
@@ -326,6 +327,9 @@ public final class Mc {
         PlayerControllerMP c = controller();
         if (p == null || c == null || target == null)
             return false;
+        // 1.8 packet order: ANIMATION (swing) BEFORE INTERACT (attack).
+        // Vanilla clickMouse calls swingItem() first, then attackEntity() sends
+        // the C02. Reversing this makes Grim PacketOrderB flag "pre-attack".
         if (swing)
             p.swingItem();
         c.attackEntity(p, target);
@@ -428,6 +432,12 @@ public final class Mc {
         player.setSprinting(sprinting);
     }
 
+    /** Clears 1.8 double-tap-W sprint re-arm so forced walk sticks until C0B. */
+    public static void clearSprintToggleTimer(EntityPlayerSP player) {
+        if (player != null)
+            ((IAccessorEntityPlayerSP) player).setSprintToggleTimer(0);
+    }
+
     public static boolean getServerSprintState() {
         return getServerSprintState(player());
     }
@@ -445,6 +455,10 @@ public final class Mc {
         if (player == null)
             return;
         if (getServerSprintState(player) == startSprinting)
+            return;
+        // Blink holds C0B/C03 off-wire; flipping serverSprintState here desyncs Grim
+        // (KeepSprint would "confirm" a walk that never arrived → AttackSlow Simulation).
+        if (BlinkManager.INSTANCE.isBlinking())
             return;
         C0BPacketEntityAction.Action action = startSprinting
             ? C0BPacketEntityAction.Action.START_SPRINTING
@@ -987,7 +1001,7 @@ public final class Mc {
         if (!hasLastServer())
             return false;
         Minecraft minecraft = mc();
-        minecraft.displayGuiScreen(new GuiConnecting(new GuiMainMenu(), minecraft, lastServer));
+        minecraft.displayGuiScreen(new GuiConnecting(new GnuMainMenuScreen(), minecraft, lastServer));
         return true;
     }
 

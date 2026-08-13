@@ -10,13 +10,14 @@ import net.minecraft.network.play.INetHandlerPlayClient;
 import net.minecraft.network.play.server.S00PacketKeepAlive;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S32PacketConfirmTransaction;
+import net.minecraft.util.AxisAlignedBB;
 
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Hypixel KB: delay self {@code S12} (+ {@code S00}/{@code S32}) for 5 ticks, then flush.
- * On hurt-time attack: sprint key re-arm for AttackSlow.
+ * After flush, while hurt and near a solid, dampen horizontal (collision absorb — not jump/sprint).
  * Setback {@code S08}→{@code S12} is never delayed (grace after S08).
  */
 public final class HypixelVelocity extends VelocityMode {
@@ -24,15 +25,16 @@ public final class HypixelVelocity extends VelocityMode {
     static final int DELAY_TICKS = 5;
     /** Ticks after {@code S08} where self {@code S12} is passed through (setback velocity). */
     static final int SETBACK_GRACE_TICKS = 3;
+    /** Horizontal scale while hurt and colliding with a nearby solid. */
+    static final double WALL_ABSORB = 0.35D;
 
     private final Queue<Packet<INetHandlerPlayClient>> packets = new ConcurrentLinkedQueue<>();
 
     private volatile boolean delayActive;
     private volatile int timeout;
     private volatile int setbackGraceTicks;
-
-    /** After hurt-time attack — sprint key next PRE so next hit can AttackSlow. */
-    private boolean pendingSprintRestore;
+    /** Hurt ticks left to attempt wall absorb after a delayed flush. */
+    private int absorbTicks;
 
     public HypixelVelocity(VelocityModule parent) {
         super("Hypixel", parent);
@@ -52,8 +54,8 @@ public final class HypixelVelocity extends VelocityMode {
         return delayActive && keepaliveOrTransaction;
     }
 
-    static boolean shouldRestoreSprintAfterAttack(int hurtTime) {
-        return hurtTime > 0;
+    static boolean shouldWallAbsorb(int absorbTicksLeft, int hurtTime, boolean nearSolid) {
+        return absorbTicksLeft > 0 && hurtTime > 0 && nearSolid;
     }
 
     @Override
@@ -96,26 +98,17 @@ public final class HypixelVelocity extends VelocityMode {
     }
 
     @Override
-    public void onAttack(Object target) {
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-        if (shouldRestoreSprintAfterAttack(player.hurtTime) && !pendingSprintRestore)
-            pendingSprintRestore = true;
-    }
-
-    @Override
     public void onUpdate(boolean pre) {
         if (pre) {
             if (setbackGraceTicks > 0)
                 setbackGraceTicks--;
-            if (pendingSprintRestore) {
-                pendingSprintRestore = false;
-                EntityPlayerSP player = Mc.player();
-                if (player != null && shouldRestoreSprintAfterAttack(player.hurtTime)
-                        && !Mc.isClientSprinting(player))
-                    Mc.setSprintKeyState(true);
+            EntityPlayerSP player = Mc.player();
+            if (player != null && shouldWallAbsorb(absorbTicks, player.hurtTime, isNearSolid(player))) {
+                player.motionX *= WALL_ABSORB;
+                player.motionZ *= WALL_ABSORB;
             }
+            if (absorbTicks > 0)
+                absorbTicks--;
             return;
         }
 
@@ -142,6 +135,15 @@ public final class HypixelVelocity extends VelocityMode {
         }
         delayActive = false;
         timeout = 0;
+        // Match remaining hurt window roughly — wall absorb only while still hurt.
+        absorbTicks = 10;
+    }
+
+    private boolean isNearSolid(EntityPlayerSP player) {
+        if (mc.theWorld == null)
+            return false;
+        AxisAlignedBB bb = player.getEntityBoundingBox().expand(0.35D, 0.0D, 0.35D);
+        return !mc.theWorld.getCollidingBoundingBoxes(player, bb).isEmpty();
     }
 
     private void abortHold() {
@@ -154,6 +156,6 @@ public final class HypixelVelocity extends VelocityMode {
     public void onDisable() {
         abortHold();
         setbackGraceTicks = 0;
-        pendingSprintRestore = false;
+        absorbTicks = 0;
     }
 }

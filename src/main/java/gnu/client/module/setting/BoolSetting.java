@@ -23,4 +23,8 @@ public final class BoolSetting extends Setting<Boolean> {
     public boolean isToggled() {
         return getValue();
     }
+
+    public void setToggled(boolean toggled) {
+        setValue(toggled);
+    }
 }

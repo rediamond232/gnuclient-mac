@@ -159,4 +159,9 @@ public final class ReachModule extends Module {
         mop.hitVec = hitVec;
         return mop;
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { String.format("%.2f", distance.getValue()) };
+    }
 }

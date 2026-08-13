@@ -2,15 +2,21 @@ package gnu.client.module.modules.combat.velocity;
 
 import gnu.client.runtime.packet.PacketUtil;
 
-import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /** Local S12 hold for OMDelay — not Blink/Lagrange. */
 public final class VelocityDelayQueue {
 
-    private final Deque<Object> held = new ArrayDeque<>();
-    private boolean delaying;
-    private long delayStartTick = -1L;
+    /**
+     * {@link #offer} is called from the Netty I/O thread (packet receive) while
+     * {@link #stopDelayAndFlush} drains on the client thread, so this cannot be an
+     * {@code ArrayDeque}.
+     */
+    private final Deque<Object> held = new ConcurrentLinkedDeque<>();
+
+    private volatile boolean delaying;
+    private volatile long delayStartTick = -1L;
 
     public void clear() {
         held.clear();

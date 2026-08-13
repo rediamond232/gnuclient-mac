@@ -5,6 +5,7 @@ import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.ui.ClientTheme;
 import gnu.client.util.RenderHelper;
 import net.minecraft.entity.Entity;
 
@@ -26,6 +27,7 @@ public final class TracersModule extends Module {
         boolean sneaking;
     }
 
+    private final BoolSetting useTheme = addSetting(new BoolSetting("Use Theme Colors", true));
     private final SliderSetting r = addSetting(new SliderSetting("Red", 0.0f, 0.0f, 255.0f));
     private final SliderSetting g = addSetting(new SliderSetting("Green", 255.0f, 0.0f, 255.0f));
     private final SliderSetting b = addSetting(new SliderSetting("Blue", 0.0f, 0.0f, 255.0f));
@@ -39,6 +41,9 @@ public final class TracersModule extends Module {
 
     public TracersModule() {
         super("Tracers", "Lines from camera to players", Category.VISUALS);
+        r.visibleWhen(() -> !useTheme.getValue());
+        g.visibleWhen(() -> !useTheme.getValue());
+        b.visibleWhen(() -> !useTheme.getValue());
     }
 
     @Override
@@ -87,9 +92,10 @@ public final class TracersModule extends Module {
         double rvpY = vp[1];
         double rvpZ = vp[2];
 
-        float fr = r.getValue() / 255.0f;
-        float fg = g.getValue() / 255.0f;
-        float fb = b.getValue() / 255.0f;
+        float[] rgb = resolveColor();
+        float fr = rgb[0];
+        float fg = rgb[1];
+        float fb = rgb[2];
         float lw = lineWidth.getValue();
 
         RenderHelper.begin();
@@ -113,6 +119,17 @@ public final class TracersModule extends Module {
         }
 
         RenderHelper.end();
+    }
+
+    private float[] resolveColor() {
+        if (useTheme.getValue()) {
+            return ClientTheme.rgbFloats(ClientTheme.getFadeColor(0));
+        }
+        return new float[] {
+                r.getValue() / 255.0f,
+                g.getValue() / 255.0f,
+                b.getValue() / 255.0f
+        };
     }
 
     private static EntityData obtain(List<EntityData> list, int index) {

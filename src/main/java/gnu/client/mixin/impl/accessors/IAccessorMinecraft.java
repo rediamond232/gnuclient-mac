@@ -8,6 +8,7 @@ import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.renderer.RenderGlobal;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Session;
 import net.minecraft.util.Timer;
 import net.minecraft.util.MouseHelper;
 import org.spongepowered.asm.mixin.Mixin;
@@ -62,4 +63,10 @@ public interface IAccessorMinecraft {
 
     @Accessor("playerController")
     PlayerControllerMP getPlayerController();
+
+    @Accessor("session")
+    Session getSessionField();
+
+    @Accessor("session")
+    void setSession(Session session);
 }

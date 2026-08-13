@@ -660,4 +660,9 @@ public final class HitSelectModule extends Module implements PacketListener {
         int rawBlockStartTick = -1;
         int rawBlockMask;
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { mode.getCurrentMode() };
+    }
 }

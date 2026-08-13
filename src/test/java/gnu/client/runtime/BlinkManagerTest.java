@@ -22,11 +22,21 @@ public class BlinkManagerTest {
     }
 
     @Test
-    public void releaseCorrectOwnerClears() {
+    public void releaseCorrectOwnerClearsBlinking() {
         mgr.setBlinkState(true, BlinkModules.AUTO_BLOCK);
+        assertTrue(mgr.setBlinkState(false, BlinkModules.AUTO_BLOCK));
+        // wsamiaw: empty queue leaves blinkModule set, only clears blinking flag
+        assertFalse(mgr.isBlinking());
+    }
+
+    @Test
+    public void releaseWithQueuedPacketsClearsOwner() {
+        mgr.setBlinkState(true, BlinkModules.AUTO_BLOCK);
+        mgr.offerPacket(new Object());
         assertTrue(mgr.setBlinkState(false, BlinkModules.AUTO_BLOCK));
         assertEquals(BlinkModules.NONE, mgr.getBlinkingModule());
         assertFalse(mgr.isBlinking());
+        assertEquals(0, mgr.queuedCount());
     }
 
     @Test

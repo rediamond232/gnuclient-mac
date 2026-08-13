@@ -547,4 +547,9 @@ public final class AimAssistModule extends Module {
             return null;
         return new double[] { vec.xCoord, vec.yCoord, vec.zCoord };
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { aimMode.getCurrentMode() };
+    }
 }

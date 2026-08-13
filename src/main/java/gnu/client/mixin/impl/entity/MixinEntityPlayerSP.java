@@ -8,6 +8,7 @@ import gnu.client.event.PostUpdateEvent;
 import gnu.client.event.PreMotionEvent;
 import gnu.client.event.PreUpdateEvent;
 import gnu.client.utility.RotationUtils;
+import net.aspw.viaforgeplus.common.CommonViaForgePlus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.AbstractClientPlayer;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -121,6 +122,11 @@ public abstract class MixinEntityPlayerSP extends AbstractClientPlayer {
             boolean moved = dx * dx + dy * dy + dz * dz > 9.0E-4 || this.positionUpdateTicks >= 20;
             boolean rotated = dyaw != 0.0 || dpitch != 0.0;
 
+            boolean viaModern = false;
+            CommonViaForgePlus manager = CommonViaForgePlus.getManager();
+            if (manager != null)
+                viaModern = manager.getTargetVersion().getVersion() > 47;
+
             if (this.ridingEntity == null) {
                 if (moved && rotated) {
                     this.sendQueue.addToSendQueue(new C03PacketPlayer.C06PacketPlayerPosLook(
@@ -133,6 +139,10 @@ public abstract class MixinEntityPlayerSP extends AbstractClientPlayer {
                 } else if (rotated) {
                     this.sendQueue.addToSendQueue(new C03PacketPlayer.C05PacketPlayerLook(
                             preMotionEvent.getYaw(), preMotionEvent.getPitch(), preMotionEvent.isOnGround()));
+                } else if (viaModern) {
+                    this.sendQueue.addToSendQueue(new C03PacketPlayer.C04PacketPlayerPosition(
+                            preMotionEvent.getPosX(), preMotionEvent.getPosY(), preMotionEvent.getPosZ(),
+                            preMotionEvent.isOnGround()));
                 } else {
                     this.sendQueue.addToSendQueue(new C03PacketPlayer(preMotionEvent.isOnGround()));
                 }

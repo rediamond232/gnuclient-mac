@@ -1,5 +1,6 @@
 package gnu.client.runtime;
 
+import gnu.client.module.modules.combat.KeepSprintModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.VelocityModule;
@@ -20,9 +21,10 @@ public final class MovementInputHook {
         VelocityModule.patchMovementInput(movementInput);
         WTapModule.patchMovementInput(movementInput);
         MoreKBModule.patchMovementInput(movementInput);
-        ScaffoldModule.patchMovementInput(movementInput);
+        KeepSprintModule.patchMovementInput(movementInput);
         KillAuraModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
         StasisModule.patchPlayerInput(movementInput);
+        ScaffoldModule.patchMovementInput(movementInput);
     }
 }

@@ -121,9 +121,12 @@ public final class BlinkModule extends Module implements PacketListener {
     private void releaseHeldPacket(Object pkt) {
         if (pkt == null)
             return;
-        if (PacketHelper.isAttackUseEntity(pkt))
+        if (PacketHelper.isAttackUseEntity(pkt)) {
+            PacketUtil.sendPacketReleased(pkt);
             PacketUtil.sendSwingAnimation();
-        PacketUtil.sendPacketReleased(pkt);
+        } else {
+            PacketUtil.sendPacketReleased(pkt);
+        }
     }
 
     private void drainOutboundQueue() {

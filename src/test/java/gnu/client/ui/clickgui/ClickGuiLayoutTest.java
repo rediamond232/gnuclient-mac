@@ -34,9 +34,9 @@ public class ClickGuiLayoutTest {
         ClickGuiLayout restored = ClickGuiLayout.fromJson(json);
 
         assertEquals(1, json.get("version").getAsInt());
-        assertEquals(2, json.size());
+        assertEquals(2, json.entrySet().size());
         JsonObject combatJson = json.getAsJsonObject("columns").getAsJsonObject("COMBAT");
-        assertEquals(3, combatJson.size());
+        assertEquals(3, combatJson.entrySet().size());
         assertTrue(combatJson.has("x"));
         assertTrue(combatJson.has("y"));
         assertTrue(combatJson.has("open"));

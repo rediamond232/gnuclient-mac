@@ -20,6 +20,15 @@ public class NoSlowModeTest {
     }
 
     @Test
+    public void swordGrimActiveExcludesFoodOnly() {
+        assertTrue(NoSlowModule.isSwordGrimActive(NoSlowModule.MODE_GRIM, true));
+        assertFalse(NoSlowModule.isSwordGrimActive(NoSlowModule.MODE_GRIM, false));
+        assertFalse(NoSlowModule.isSwordGrimActive(NoSlowModule.MODE_VANILLA, true));
+        assertTrue(NoSlowModule.isFoodGrimSelected(NoSlowModule.MODE_GRIM, true));
+        assertFalse(NoSlowModule.isFoodGrimSelected(NoSlowModule.MODE_NONE, true));
+    }
+
+    @Test
     public void eatingMatchesOpenMyauEnumAction() {
         assertTrue(NoSlowModule.matchesEatingUseAction(EnumAction.EAT, false));
         assertTrue(NoSlowModule.matchesEatingUseAction(EnumAction.DRINK, false));

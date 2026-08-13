@@ -30,14 +30,38 @@ public final class UiKit {
 
     public static final int SURFACE = 0xD90F121B;
     public static final int SURFACE_STRONG = 0xF5141823;
+    /** ClickGUI / settings panel body (opaque near-black). */
+    public static final int PANEL = 0xF00C0E16;
+    /** ClickGUI category header strip. */
+    public static final int PANEL_HEADER = 0xFF10121A;
+    /** Inactive module row fill. */
+    public static final int ROW_IDLE = 0xD010121A;
+    /** Hovered inactive module row fill. */
+    public static final int ROW_HOVER = 0xE0181A24;
+    /** Slider / chip track neutrals. */
+    public static final int TRACK = 0xFF2A2E38;
+    public static final int TRACK_DIM = 0xFF333846;
     public static final int LINE = 0x13FFFFFF;
     public static final int TEXT = 0xFFF5F6FA;
     public static final int MUTED = 0xFF969CAB;
     public static final int MUTED_DIM = 0xFF5A606E;
-    public static final int ACCENT = 0xFF8B5CF6;
-    public static final int ACCENT_2 = 0xFF5F8CFF;
+    /** Static fallbacks — match {@link ClientTheme} defaults. */
+    public static final int ACCENT = ClientTheme.DEFAULT_COLOR1;
+    public static final int ACCENT_2 = ClientTheme.DEFAULT_COLOR2;
+
+    /** Live primary accent from Theme (falls back to {@link #ACCENT}). */
+    public static int accent() {
+        return ClientTheme.color1();
+    }
+
+    /** Live secondary accent from Theme (falls back to {@link #ACCENT_2}). */
+    public static int accent2() {
+        return ClientTheme.color2();
+    }
     public static final int SUCCESS = 0xFF57D7A0;
     public static final int DANGER = 0xFFFF7187;
+    /** Keybind listening / warn highlight. */
+    public static final int WARN = 0xFFFFFF55;
 
     public static final float RADIUS_PANEL = 13f;
     public static final float RADIUS_ROW = 8f;
@@ -73,6 +97,65 @@ public final class UiKit {
             return 1f;
         }
         return v;
+    }
+
+    /**
+     * Reset shader / texture-unit state so textured text (UiFont / FontRenderer)
+     * cannot sample leftover UI or terrain atlases after rounded-panel draws.
+     */
+    public static void prepareFixedPipeline() {
+        GL20.glUseProgram(0);
+        GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
+        GlStateManager.enableTexture2D();
+        GlStateManager.disableLighting();
+        GlStateManager.disableDepth();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        GlStateManager.color(1f, 1f, 1f, 1f);
+    }
+
+    /**
+     * Bind a GL texture id while keeping {@link GlStateManager}'s cache in sync.
+     * Raw {@code glBindTexture} after a cached bind causes FontRenderer to skip
+     * rebinds and draw with the terrain atlas (block-looking glyphs).
+     */
+    public static void syncTextureBind(int textureId) {
+        // Force cache miss, then bind the real id through GlStateManager.
+        int probe = textureId == 0 ? 1 : 0;
+        GlStateManager.bindTexture(probe);
+        GlStateManager.bindTexture(textureId);
+    }
+
+    /** Invalidate the texture cache so the next bind always hits GL. */
+    public static void invalidateTextureBind() {
+        GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
+        int current = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int probe = current == 0 ? 1 : 0;
+        GlStateManager.bindTexture(probe);
+        GlStateManager.bindTexture(current);
+    }
+
+    /** Solid axis-aligned rect — no SDF shader (safe next to text draws). */
+    public static void drawSolidRect(float x, float y, float w, float h, int argb) {
+        if (w <= 0f || h <= 0f || ((argb >>> 24) & 0xFF) == 0) {
+            return;
+        }
+        float a = ((argb >>> 24) & 0xFF) / 255f;
+        float r = ((argb >> 16) & 0xFF) / 255f;
+        float g = ((argb >> 8) & 0xFF) / 255f;
+        float b = (argb & 0xFF) / 255f;
+        prepareFixedPipeline();
+        GlStateManager.disableTexture2D();
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        wr.pos(x, y + h, 0.0).color(r, g, b, a).endVertex();
+        wr.pos(x + w, y + h, 0.0).color(r, g, b, a).endVertex();
+        wr.pos(x + w, y, 0.0).color(r, g, b, a).endVertex();
+        wr.pos(x, y, 0.0).color(r, g, b, a).endVertex();
+        tess.draw();
+        GlStateManager.enableTexture2D();
+        GlStateManager.color(1f, 1f, 1f, 1f);
     }
 
     /** Frame clock: nanoTime, dt capped ~50ms, optional speed multiplier. */
@@ -395,13 +478,19 @@ public final class UiKit {
                 GL11.glViewport(VIEWPORT_BUF.get(0), VIEWPORT_BUF.get(1), VIEWPORT_BUF.get(2), VIEWPORT_BUF.get(3));
 
                 GL20.glUseProgram(program);
-                GL13.glActiveTexture(activeTexture);
-                GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureBinding);
+                // Prefer GlStateManager for active texture so its unit index stays correct.
+                // 1.8.9 only tracks units 0–7; shaders may leave 8–15 active via raw GL.
+                int unit = activeTexture - OpenGlHelper.defaultTexUnit;
+                if (unit < 0 || unit > 7) {
+                    activeTexture = OpenGlHelper.defaultTexUnit;
+                }
+                GlStateManager.setActiveTexture(activeTexture);
+                syncTextureBind(textureBinding);
 
                 if (texture) {
-                    GL11.glEnable(GL11.GL_TEXTURE_2D);
+                    GlStateManager.enableTexture2D();
                 } else {
-                    GL11.glDisable(GL11.GL_TEXTURE_2D);
+                    GlStateManager.disableTexture2D();
                 }
                 if (blend) {
                     GL11.glEnable(GL11.GL_BLEND);
@@ -436,6 +525,219 @@ public final class UiKit {
 
     public static void drawRoundedPanel(float x, float y, float w, float h, float radius, int argb) {
         RoundedPanel.draw(x, y, w, h, radius, argb);
+    }
+
+    /** Soft outer glow: expanding rounded layers with decaying alpha. */
+    public static void drawGlowRect(float x, float y, float w, float h, float radius, int argb, float strength) {
+        if (w <= 0f || h <= 0f || strength <= 0f)
+            return;
+        float s = clamp01(strength);
+        // 3 soft layers — enough bloom without visible strip rings
+        for (int i = 3; i >= 1; i--) {
+            float expand = i * 2.0f;
+            float a = (0.18f / i) * s;
+            drawRoundedPanel(x - expand, y - expand, w + expand * 2f, h + expand * 2f,
+                    radius + expand * 0.3f, ClientTheme.withAlpha(argb, a));
+        }
+    }
+
+    /** Extra-strong dual-color bloom for enabled module tiles / panel edges. */
+    public static void drawAccentGlow(float x, float y, float w, float h, float radius, float strength) {
+        if (strength <= 0.01f)
+            return;
+        float s = clamp01(strength);
+        drawSoftBloom(x, y, w, h, radius, ClientTheme.color1(), s);
+        drawSoftBloom(x, y, w, h, radius, ClientTheme.color2(), s * 0.55f);
+    }
+
+    public static void drawGlowText(String text, float x, float y, float size, int argb, float glowStrength) {
+        if (text == null || text.isEmpty())
+            return;
+        float s = clamp01(glowStrength);
+        int glow = ClientTheme.withAlpha(argb, 0.35f * s);
+        UiFont.draw(text, x - 1f, y, size, glow);
+        UiFont.draw(text, x + 1f, y, size, glow);
+        UiFont.draw(text, x, y - 1f, size, glow);
+        UiFont.draw(text, x, y + 1f, size, glow);
+        UiFont.draw(text, x, y, size, argb);
+    }
+
+    public static void drawHorizontalGradient(float x, float y, float w, float h, int left, int right) {
+        if (w <= 0f || h <= 0f)
+            return;
+        float a1 = ((left >>> 24) & 0xFF) / 255f;
+        float r1 = ((left >> 16) & 0xFF) / 255f;
+        float g1 = ((left >> 8) & 0xFF) / 255f;
+        float b1 = (left & 0xFF) / 255f;
+        float a2 = ((right >>> 24) & 0xFF) / 255f;
+        float r2 = ((right >> 16) & 0xFF) / 255f;
+        float g2 = ((right >> 8) & 0xFF) / 255f;
+        float b2 = (right & 0xFF) / 255f;
+        GlStateManager.disableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        wr.pos(x, y + h, 0).color(r1, g1, b1, a1).endVertex();
+        wr.pos(x + w, y + h, 0).color(r2, g2, b2, a2).endVertex();
+        wr.pos(x + w, y, 0).color(r2, g2, b2, a2).endVertex();
+        wr.pos(x, y, 0).color(r1, g1, b1, a1).endVertex();
+        tess.draw();
+        GlStateManager.enableTexture2D();
+    }
+
+    /** Vertical gradient: {@code top} at y, {@code bottom} at y+h. */
+    public static void drawVerticalGradient(float x, float y, float w, float h, int top, int bottom) {
+        if (w <= 0f || h <= 0f)
+            return;
+        float a1 = ((top >>> 24) & 0xFF) / 255f;
+        float r1 = ((top >> 16) & 0xFF) / 255f;
+        float g1 = ((top >> 8) & 0xFF) / 255f;
+        float b1 = (top & 0xFF) / 255f;
+        float a2 = ((bottom >>> 24) & 0xFF) / 255f;
+        float r2 = ((bottom >> 16) & 0xFF) / 255f;
+        float g2 = ((bottom >> 8) & 0xFF) / 255f;
+        float b2 = (bottom & 0xFF) / 255f;
+        GlStateManager.disableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        wr.pos(x, y + h, 0).color(r2, g2, b2, a2).endVertex();
+        wr.pos(x + w, y + h, 0).color(r2, g2, b2, a2).endVertex();
+        wr.pos(x + w, y, 0).color(r1, g1, b1, a1).endVertex();
+        wr.pos(x, y, 0).color(r1, g1, b1, a1).endVertex();
+        tess.draw();
+        GlStateManager.enableTexture2D();
+    }
+
+    /**
+     * Smooth HSB saturation×brightness field for the current hue (no block cells).
+     * X = saturation, Y = brightness (1 at top).
+     */
+    public static void drawSvColorField(float x, float y, float w, float h, int hueRgb, float alpha) {
+        if (w <= 0f || h <= 0f) {
+            return;
+        }
+        float a = clamp01(alpha);
+        int cols = Math.max(24, (int) Math.ceil(w));
+        int rows = Math.max(16, (int) Math.ceil(h));
+        float hr = ((hueRgb >> 16) & 0xFF) / 255f;
+        float hg = ((hueRgb >> 8) & 0xFF) / 255f;
+        float hb = (hueRgb & 0xFF) / 255f;
+
+        GlStateManager.disableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        for (int i = 0; i < cols; i++) {
+            float s0 = i / (float) cols;
+            float s1 = (i + 1) / (float) cols;
+            float x0 = x + s0 * w;
+            float x1 = x + s1 * w;
+            for (int j = 0; j < rows; j++) {
+                float b0 = 1f - j / (float) rows;
+                float b1 = 1f - (j + 1) / (float) rows;
+                float y0 = y + j / (float) rows * h;
+                float y1 = y + (j + 1) / (float) rows * h;
+                putSvCorner(wr, x0, y1, s0, b1, hr, hg, hb, a);
+                putSvCorner(wr, x1, y1, s1, b1, hr, hg, hb, a);
+                putSvCorner(wr, x1, y0, s1, b0, hr, hg, hb, a);
+                putSvCorner(wr, x0, y0, s0, b0, hr, hg, hb, a);
+            }
+        }
+        tess.draw();
+        GlStateManager.enableTexture2D();
+    }
+
+    private static void putSvCorner(WorldRenderer wr, float px, float py,
+            float sat, float bri, float hr, float hg, float hb, float a) {
+        // HSB: mix white→hue by sat, then scale by brightness
+        float r = (1f + (hr - 1f) * sat) * bri;
+        float g = (1f + (hg - 1f) * sat) * bri;
+        float b = (1f + (hb - 1f) * sat) * bri;
+        wr.pos(px, py, 0).color(r, g, b, a).endVertex();
+    }
+
+    /** Smooth full-spectrum hue bar (continuous, no chunky blocks). */
+    public static void drawHueSpectrum(float x, float y, float w, float h, float alpha) {
+        if (w <= 0f || h <= 0f) {
+            return;
+        }
+        float a = clamp01(alpha);
+        int steps = Math.max(48, (int) Math.ceil(w));
+        GlStateManager.disableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        for (int i = 0; i < steps; i++) {
+            float t0 = i / (float) steps;
+            float t1 = (i + 1) / (float) steps;
+            int c0 = ClientTheme.hueRgb(t0);
+            int c1 = ClientTheme.hueRgb(t1);
+            float x0 = x + t0 * w;
+            float x1 = x + t1 * w;
+            float r0 = ((c0 >> 16) & 0xFF) / 255f;
+            float g0 = ((c0 >> 8) & 0xFF) / 255f;
+            float b0 = (c0 & 0xFF) / 255f;
+            float r1 = ((c1 >> 16) & 0xFF) / 255f;
+            float g1 = ((c1 >> 8) & 0xFF) / 255f;
+            float b1 = (c1 & 0xFF) / 255f;
+            wr.pos(x0, y + h, 0).color(r0, g0, b0, a).endVertex();
+            wr.pos(x1, y + h, 0).color(r1, g1, b1, a).endVertex();
+            wr.pos(x1, y, 0).color(r1, g1, b1, a).endVertex();
+            wr.pos(x0, y, 0).color(r0, g0, b0, a).endVertex();
+        }
+        tess.draw();
+        GlStateManager.enableTexture2D();
+    }
+
+    /**
+     * Vertical Color1→Color2 fade. Uses a smooth GL gradient (not stacked strips).
+     * {@code radius} is reserved for callers; strip-based rounding caused visible banding.
+     */
+    public static void drawVerticalGradientRounded(float x, float y, float w, float h,
+            float radius, int top, int bottom) {
+        drawVerticalGradient(x, y, w, h, top, bottom);
+    }
+
+    /** Soft diffuse bloom — wide, low alpha, no hard ring/border look. */
+    public static void drawSoftBloom(float x, float y, float w, float h, float radius, int argb, float strength) {
+        if (w <= 0f || h <= 0f || strength <= 0.01f)
+            return;
+        float s = clamp01(strength);
+        for (int i = 8; i >= 1; i--) {
+            float expand = i * 3.2f;
+            float a = (0.14f / i) * s;
+            drawRoundedPanel(x - expand, y - expand, w + expand * 2f, h + expand * 2f,
+                    radius + expand * 0.45f, ClientTheme.withAlpha(argb, a));
+        }
+    }
+
+    /** Draws text with a horizontal Color1→Color2 gradient across glyphs. */
+    public static void drawGradientText(String text, float x, float y, float size) {
+        if (text == null || text.isEmpty())
+            return;
+        float total = UiFont.width(text, size);
+        if (total <= 0f) {
+            UiFont.draw(text, x, y, size, ClientTheme.color1());
+            return;
+        }
+        float cursor = x;
+        for (int i = 0; i < text.length(); i++) {
+            String ch = text.substring(i, i + 1);
+            float cw = UiFont.width(ch, size);
+            float t = (cursor - x + cw * 0.5f) / total;
+            int col = ClientTheme.lerp(t);
+            UiFont.draw(ch, cursor, y, size, col);
+            cursor += cw;
+        }
     }
 
     /**
@@ -519,7 +821,6 @@ public final class UiKit {
             boolean alphaWas = GL11.glIsEnabled(GL11.GL_ALPHA_TEST);
             boolean blendWas = GL11.glIsEnabled(GL11.GL_BLEND);
             boolean texWas = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
-            int prevProg = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
 
             GlStateManager.disableAlpha();
             GlStateManager.enableBlend();
@@ -552,7 +853,8 @@ public final class UiKit {
             wr.pos(x0, y0, 0.0).tex(u0, v0).endVertex();
             tess.draw();
 
-            GL20.glUseProgram(prevProg);
+            // Drop back to fixed pipeline — never leave the SDF program bound for text.
+            GL20.glUseProgram(0);
             if (texWas) {
                 GlStateManager.enableTexture2D();
             } else {

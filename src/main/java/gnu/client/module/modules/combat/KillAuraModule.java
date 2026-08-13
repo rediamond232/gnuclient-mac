@@ -15,11 +15,15 @@ import gnu.client.runtime.CombatAttackNotify;
 import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.runtime.packet.PacketEvents;
+import gnu.client.runtime.packet.PacketHelper;
+import gnu.client.runtime.packet.PacketListener;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.scoreboard.Team;
 import net.minecraft.util.MovementInput;
 
@@ -54,7 +58,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * OpenMyau's LiquidBounce rotation mode is intentionally not ported.
  * Auto-block modes are handled by {@link KillAuraAutoBlock} (default NONE).
  */
-public final class KillAuraModule extends Module {
+public final class KillAuraModule extends Module implements PacketListener {
 
     // ── Rotation modes ──────────────────────────────────────────────────
     private static final int ROT_NONE = 0;
@@ -117,17 +121,21 @@ public final class KillAuraModule extends Module {
     private final BoolSetting inventoryCheck = addSetting(new BoolSetting("InventoryCheck", true));
 
     private static final List<String> AUTO_BLOCK_MODES = Arrays.asList(
-        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE", "GRIM");
+        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE",
+        "GRIM", "WATCHDOG2", "HYPIXEL3");
     private final ModeSetting autoBlock = addSetting(new ModeSetting("Auto-block", 0, AUTO_BLOCK_MODES));
     private final SliderSetting autoBlockCps = addSetting(new SliderSetting("AutoBlockCPS", 8.0f, 1.0f, 10.0f));
     private final SliderSetting autoBlockRange = addSetting(new SliderSetting("AutoBlockRange", 6.0f, 3.0f, 8.0f));
     private final BoolSetting autoBlockRequirePress = addSetting(new BoolSetting("AutoBlockRequirePress", false));
     private final SliderSetting grimReleaseDelay = addSetting(new SliderSetting("GrimReleaseDelay", 2.0f, 1.0f, 10.0f, 1.0f));
+    private final BoolSetting disableKeepSprintOnKb = addSetting(new BoolSetting("DisableKeepSprintOnKB", true));
     private final KillAuraAutoBlock autoBlockHelper = new KillAuraAutoBlock();
 
     // ── State ─────────────────────────────────────────────────────────────
 
     private long lastAttackMs = 0L;
+    /** wsamiaw tick-bucket attack cooldown (decremented by 50ms each PRE). */
+    private long attackDelayMs = 0L;
     private Entity attackTarget;
     private float lastSentYaw = Float.MIN_VALUE;
     private float lastSentPitch = Float.MIN_VALUE;
@@ -146,6 +154,10 @@ public final class KillAuraModule extends Module {
         autoBlockRange.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         autoBlockRequirePress.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         grimReleaseDelay.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.GRIM);
+        disableKeepSprintOnKb.visibleWhen(() -> {
+            int m = autoBlock.getValue();
+            return m == KillAuraAutoBlock.WATCHDOG2 || m == KillAuraAutoBlock.HYPIXEL3;
+        });
         switchDelayMs.visibleWhen(() -> mode.getValue() == MODE_SWITCH);
         minCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
         maxCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
@@ -163,11 +175,14 @@ public final class KillAuraModule extends Module {
         hitRegisteredSinceSwitch = false;
         lastSwitchMs = 0L;
         patternIndex = 0;
+        attackDelayMs = 0L;
         AuraCombatPacketGuard.register();
+        PacketEvents.register(this);
     }
 
     @Override
     public void onDisable() {
+        PacketEvents.unregister(this);
         clearRotationStateIfOwned();
         attackTarget = null;
         resetRotationState();
@@ -183,6 +198,7 @@ public final class KillAuraModule extends Module {
     @Override
     public void onTickStart() {
         AuraCombatPacketGuard.onClientTickStart();
+        KeepSprintModule.onClientTickStart();
     }
 
     @Override
@@ -227,6 +243,49 @@ public final class KillAuraModule extends Module {
         KillAuraModule ka = (KillAuraModule) module;
         return ka.autoBlock.getValue() != KillAuraAutoBlock.NONE
             && ka.autoBlockHelper.isBlockingSession();
+    }
+
+    /** Pre-tick Grim auto-block phase from {@link KillAuraAutoBlock#tick} entry; {@code -1} if not KA GRIM. */
+    public static int getPreTickGrimPhase() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return -1;
+        KillAuraModule ka = (KillAuraModule) module;
+        if (ka.autoBlock.getValue() != KillAuraAutoBlock.GRIM)
+            return -1;
+        return ka.autoBlockHelper.getPreTickGrimPhase();
+    }
+
+    public static boolean getPreTickGrimAttackAllowed() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        if (ka.autoBlock.getValue() != KillAuraAutoBlock.GRIM)
+            return false;
+        return ka.autoBlockHelper.getPreTickGrimAttackAllowed();
+    }
+
+    public static boolean willGrimAttackThisTick() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        if (ka.autoBlock.getValue() != KillAuraAutoBlock.GRIM)
+            return false;
+        return ka.autoBlockHelper.getPreTickGrimPhase() == 0
+            && ka.autoBlockHelper.getPreTickGrimAttackAllowed();
+    }
+
+    /**
+     * Client-side visual sword block (Auto-block FAKE and other modes that set
+     * {@code fakeBlockState}). Render mixins only — not a real use-item session.
+     */
+    public static boolean isFakeBlocking() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        return ((KillAuraModule) module).autoBlockHelper.isFakeBlocking();
     }
 
     public static void onPreUpdate(Object player) {
@@ -287,18 +346,65 @@ public final class KillAuraModule extends Module {
         if (killAura == null)
             return;
 
+        MovementInput input = (MovementInput) movInput;
+        if (killAura.autoBlockHelper.shouldAutoBlock())
+            input.jump = false;
+
         if (killAura.rotations.getValue() != ROT_SILENT
             || killAura.moveFix.getValue() == MOVEFIX_NONE
             || !MoveFixUtil.hasMoveFixPriority(ROTATION_PRIORITY)
             || !MoveFixUtil.isForwardPressed())
             return;
 
-        MovementInput input = (MovementInput) movInput;
         boolean sneak = input.sneak;
         float[] fixed = MoveFixUtil.fixStrafe(
             Mc.getYaw(), RotationState.getSmoothedYaw(), sneak);
         input.moveForward = fixed[0];
         input.moveStrafe = fixed[1];
+    }
+
+    public static boolean shouldAutoBlock() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        return ((KillAuraModule) module).autoBlockHelper.shouldAutoBlock();
+    }
+
+    @Override
+    public boolean onSend(Object packet) {
+        // Priority above BlinkManager so C09/C07 still update blockingState when held.
+        autoBlockHelper.onOutboundPacket(packet);
+        return false;
+    }
+
+    @Override
+    public int sendPriority() {
+        return 150;
+    }
+
+    @Override
+    public boolean onReceive(Object packet) {
+        if (!isEnabled() || Mc.player() == null || Mc.world() == null)
+            return false;
+        int mode = autoBlock.getValue();
+        if ((mode != KillAuraAutoBlock.WATCHDOG2 && mode != KillAuraAutoBlock.HYPIXEL3)
+                || !disableKeepSprintOnKb.getValue())
+            return false;
+
+        boolean kb = false;
+        if (packet instanceof S12PacketEntityVelocity) {
+            S12PacketEntityVelocity vel = (S12PacketEntityVelocity) packet;
+            if (vel.getEntityID() == Mc.player().getEntityId())
+                kb = true;
+        } else if (PacketHelper.isExplosion(packet)) {
+            if (PacketHelper.explosionMotionX(packet) != 0.0F
+                    || PacketHelper.explosionMotionY(packet) != 0.0F
+                    || PacketHelper.explosionMotionZ(packet) != 0.0F)
+                kb = true;
+        }
+        if (kb)
+            Mc.player().setSprinting(false);
+        return false;
     }
 
     // ── Per-tick flow ─────────────────────────────────────────────────────
@@ -310,9 +416,13 @@ public final class KillAuraModule extends Module {
         if (!(player instanceof EntityPlayerSP))
             player = Mc.player();
         if (!(player instanceof EntityPlayerSP) || !canRunCombat()) {
+            EntityPlayerSP lost = player instanceof EntityPlayerSP
+                ? (EntityPlayerSP) player : Mc.player();
             attackTarget = null;
             clearRotationStateIfOwned();
             autoBlockHelper.reset();
+            if (lost != null)
+                KeepSprintModule.onKillAuraTargetLost(lost);
             return;
         }
         EntityPlayerSP sp = (EntityPlayerSP) player;
@@ -321,8 +431,12 @@ public final class KillAuraModule extends Module {
         if (attackTarget == null) {
             clearRotationStateIfOwned();
             autoBlockHelper.reset();
+            KeepSprintModule.onKillAuraTargetLost(sp);
             return;
         }
+
+        // Arm after target exists — tickStart/maintainWalk often see null target.
+        KeepSprintModule.onKillAuraTargetReady(sp);
 
         prepareRotation(sp);
 
@@ -337,10 +451,9 @@ public final class KillAuraModule extends Module {
         }
 
         long now = System.currentTimeMillis();
-        long delayNeeded = autoBlockHelper.isBlockingSession()
-            ? autoBlockHelper.attackDelayMsWhenBlocking(autoBlockCps.getValue())
-            : getAttackDelayMs();
-        long remainingDelay = Math.max(0L, lastAttackMs + delayNeeded - now);
+        // wsamiaw: attackDelayMS -= 50 each PRE tick
+        if (attackDelayMs > 0L)
+            attackDelayMs -= 50L;
 
         EntityLivingBase livingTarget = attackTarget instanceof EntityLivingBase
             ? (EntityLivingBase) attackTarget : null;
@@ -350,10 +463,9 @@ public final class KillAuraModule extends Module {
         ctx.hasValidTarget = hasValidTargetInAutoBlockRange(sp);
         ctx.attackEligible = isAttackEligible(sp);
         ctx.canAutoBlock = canAutoBlock();
-        ctx.manualUseKeyDown = Mc.isPhysicalRmbDown() || Mc.isUseItemKeyDown();
-        ctx.requirePress = autoBlockRequirePress.getValue();
         ctx.grimReleaseDelay = Math.round(grimReleaseDelay.getValue());
-        ctx.attackDelayMs = remainingDelay;
+        ctx.attackDelayMs = Math.max(0L, attackDelayMs);
+        ctx.autoBlockCps = autoBlockCps.getValue();
         ctx.yaw = aimYaw;
         ctx.pitch = aimPitch;
         ctx.target = livingTarget;
@@ -365,6 +477,8 @@ public final class KillAuraModule extends Module {
             attacked = tryPerformAttack(sp);
 
         autoBlockHelper.applyAfterAttack(tickResult, attacked, aimYaw, aimPitch, livingTarget);
+        if (attacked)
+            autoBlockHelper.notifyAttackSucceeded();
     }
 
     private void afterWalking(Object player) {
@@ -617,7 +731,7 @@ public final class KillAuraModule extends Module {
             return true;
         if (isEatingOrUsingBow(player))
             return true;
-        if (autoBlock.getValue() == KillAuraAutoBlock.VANILLA)
+        if (KillAuraAutoBlock.isAttackAllowedWhileBlocking(autoBlock.getValue()))
             return false;
         if (Mc.isUsingItem(player) || Mc.isBlocking(player))
             return true;
@@ -654,6 +768,9 @@ public final class KillAuraModule extends Module {
     private boolean canAttackThisTick(EntityPlayerSP player) {
         if (player == null || attackTarget == null || !canRunCombat())
             return false;
+        if (gnu.client.runtime.PlayerStateManager.INSTANCE.digging
+                || gnu.client.runtime.PlayerStateManager.INSTANCE.placing)
+            return false;
         if (requirePress.getValue() && !Mc.isPhysicalLmbDown())
             return false;
         if (inventoryCheck.getValue() && Mc.currentScreen() != null)
@@ -662,24 +779,20 @@ public final class KillAuraModule extends Module {
             return false;
         if (shouldSkipAttackForItemUse(player))
             return false;
-        // Grim PacketOrderI: C07 RELEASE then C02 same tick → type=attack, releasing=true.
         if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
             return false;
-
-        long now = System.currentTimeMillis();
-        long delayMs = autoBlockHelper.isBlockingSession()
-            ? autoBlockHelper.attackDelayMsWhenBlocking(autoBlockCps.getValue())
-            : getAttackDelayMs();
-        if (now - lastAttackMs < delayMs)
+        // wsamiaw: refuse while attackDelayMS > 0
+        if (attackDelayMs > 0L)
             return false;
-
-        // AttackRange: look-ray must hit box with the look Grim will use on next flying.
-        if (!lookHitsAttackTarget(player, attackRange.getValue()))
-            return false;
-
         if (HitSelectModule.shouldBlockClick())
             return false;
         return Mc.controller() != null;
+    }
+
+    private long getSessionAttackDelayMs() {
+        if (autoBlockHelper.isBlockingSession())
+            return autoBlockHelper.attackDelayMsWhenBlocking(autoBlockCps.getValue());
+        return getAttackDelayMs();
     }
 
     /**
@@ -723,9 +836,24 @@ public final class KillAuraModule extends Module {
         return 1000L / cps;
     }
 
-    /** @return true if an attack packet was sent this call */
+    /**
+     * wsamiaw {@code performAttack}: add delay + swing first; ray miss still consumes delay;
+     * GRIM sends C02 INTERACT then ATTACK (no sync); then client-side hit apply.
+     */
     private boolean tryPerformAttack(EntityPlayerSP player) {
         if (!canAttackThisTick(player))
+            return false;
+        // KeepSprint: first hit of a fight STOPs once; later hits own while walking.
+        if (KeepSprintModule.tryBeginFightForImminentAttack(player))
+            return false;
+        if (KeepSprintModule.shouldDeferKillAuraAttack())
+            return false;
+
+        // wsamiaw adds delay before ray check — miss still burns CPS budget
+        attackDelayMs += getSessionAttackDelayMs();
+        player.swingItem();
+
+        if (!lookHitsAttackTarget(player, attackRange.getValue()))
             return false;
 
         notifyPreAttackHooks(attackTarget);
@@ -740,22 +868,31 @@ public final class KillAuraModule extends Module {
             player.rotationPitch = pendingSentPitch;
         }
 
-        boolean swing = true;
-        boolean attacked = Mc.attackEntity(attackTarget, swing);
+        boolean keepSprintOwned = KeepSprintModule.onBeforeKillAuraAttack(player);
+
+        boolean attacked;
+        if (autoBlock.getValue() == KillAuraAutoBlock.GRIM) {
+            Mc.addToSendQueue(new net.minecraft.network.play.client.C02PacketUseEntity(
+                    attackTarget, net.minecraft.network.play.client.C02PacketUseEntity.Action.INTERACT));
+            Mc.addToSendQueue(new net.minecraft.network.play.client.C02PacketUseEntity(
+                    attackTarget, net.minecraft.network.play.client.C02PacketUseEntity.Action.ATTACK));
+            player.attackTargetEntityWithCurrentItem(attackTarget);
+            attacked = true;
+        } else {
+            attacked = Mc.attackEntity(attackTarget, false);
+        }
 
         if (useSilentAim) {
             player.rotationYaw = savedYaw;
             player.rotationPitch = savedPitch;
         }
 
+        KeepSprintModule.onAfterKillAuraAttack(player, keepSprintOwned);
+
         if (!attacked)
             return false;
 
-        // OpenMyau: vanilla/PlayerUtil applies motion*=0.6 + setSprinting(false) when
-        // sprinting. Do NOT clear the sprint key or suppress re-sprint — living must
-        // re-apply sprint accel on ground or Grim predicts +0.03 (Simulation sawtooth).
         hitRegisteredSinceSwitch = true;
-
         lastAttackMs = System.currentTimeMillis();
         AimAssistModule.lastClickMs = lastAttackMs;
 
@@ -785,7 +922,7 @@ public final class KillAuraModule extends Module {
     }
 
     private void clearRotationStateIfOwned() {
-        // KA MoveFix = 1; KA render-only = -1. Do not clear Scaffold MoveFix (3).
+        // KA MoveFix = 1; KA render-only = -1. Do not clear another module's MoveFix.
         int p = (int) RotationState.getPriority();
         if (p == ROTATION_PRIORITY || p == -1)
             RotationState.reset();

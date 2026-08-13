@@ -34,7 +34,7 @@ public final class RotationState {
      * @param yaw packet / look yaw (C03 + rendered head)
      * @param pitch packet pitch (C03 + rendered head)
      * @param pervYaw <b>move yaw</b> for fixStrafe / moveFlying
-     * @param rotPriority KillAura=1, Scaffold=3 when MoveFix armed; use {@code -1}
+     * @param rotPriority KillAura=1, Displace=2 when MoveFix armed; use {@code -1}
      *                    for render-only silent rotations (no moveFlying swap)
      */
     public static void applyState(boolean active, float yaw, float pitch, float pervYaw, int rotPriority) {

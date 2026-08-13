@@ -3,16 +3,16 @@ package gnu.client.module.modules.network;
 import gnu.client.mixin.RealPosAccess;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.module.modules.network.KnockbackDelayModule;
+import gnu.client.runtime.RotationState;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
-import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.runtime.packet.InboundLagCoordinator;
+import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import gnu.client.ui.UiFont;
@@ -22,72 +22,59 @@ import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.C02PacketUseEntity;
-import net.minecraft.network.play.server.S00PacketKeepAlive;
-import net.minecraft.network.play.server.S03PacketTimeUpdate;
-import net.minecraft.network.play.server.S06PacketUpdateHealth;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
-import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S14PacketEntity;
 import net.minecraft.network.play.server.S18PacketEntityTeleport;
-import net.minecraft.network.play.server.S19PacketEntityStatus;
-import net.minecraft.network.play.server.S27PacketExplosion;
-import net.minecraft.network.play.server.S29PacketSoundEffect;
-import net.minecraft.network.play.server.S0CPacketSpawnPlayer;
-import net.minecraft.network.play.server.S3EPacketTeams;
 import net.minecraft.util.MathHelper;
-import net.minecraft.util.Vec3;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * gnuclient-recode BackTrack — attack-driven, players-only, faithful to the original.
  *
  * <p>BackTrack tracks the entity you last attacked (from the outgoing C02 ATTACK packet) and
  * only ever backtracks players — it never pulls KillAura's target or holds packets for mobs,
- * animals, villagers or armor stands. Packets are only delayed within the post-attack window:
- * for {@code HurtTime} ms after the most recent hit (tracked via {@link CombatAttackNotify}),
- * and the hold pauses while taking knockback. Simply approaching a player does nothing — it
- * is an attack aid, not a passive hold. Each hold rolls a packet delay in [MinDelay, MaxDelay]
- * shown in the ArrayList. The target is rendered at its past position via {@code realPosX/Y/Z}
- * (RealPosAccess); the ESP draws the smooth true server position Lagrange-style.
+ * animals, villagers or armor stands. Target {@code S14}/{@code S18} packets are queued only
+ * within the post-attack window ({@code HurtTime} ms after the initiating hit) and each queued
+ * packet is age-released after the rolled [MinDelay, MaxDelay] ms so the entity trails by that
+ * lag. When the hold ends, queued packets are replayed via processInbound (vanilla
+ * interpolation) rather than a teleport snap. Taking knockback flushes. The ESP draws the
+ * smooth true server position.
  */
 public final class BacktrackModule extends Module implements PacketListener {
 
     private final SliderSetting hitRange = addSetting(new SliderSetting("MaxHitRange", 6.0f, 3.0f, 6.0f));
-    /** BackTrack packet-delay range (ms). Each hold rolls a value in [MinDelay, MaxDelay]
-     *  — e.g. 300-400 rolls 353, so inbound packets are delayed by 353ms that hold. */
+    /** How long (ms) each queued target S14/S18 sits before processInbound. Each hold rolls
+     *  a value in [MinDelay, MaxDelay] — e.g. 300-400 rolls 353, so movement lags by 353ms. */
     private final SliderSetting minTime = addSetting(new SliderSetting("MinDelay", 1000.0f, 0.0f, 10000.0f, 10.0f));
     private final SliderSetting maxTime = addSetting(new SliderSetting("MaxDelay", 4000.0f, 0.0f, 10000.0f, 10.0f));
-    /** How long (ms) BackTrack keeps delaying packets after you hit the enemy. The hold
-     *  starts on attack and flushes HurtTime ms later (mirrors the old gnuclient BackTrack
-     *  post-attack window). */
+    /** How long (ms) after the initiating hit BackTrack keeps accepting / delaying S14/S18.
+     *  When the window ends the queue is flushed to the live server pos in one step. */
     private final SliderSetting hurtTime = addSetting(new SliderSetting("HurtTime", 250.0f, 0.0f, 1000.0f, 10.0f));
+    /** When on, hard-flush if the live server position is closer than the delayed entity. */
+    private final BoolSetting smartFlush = addSetting(new BoolSetting("Smart Flush", false));
+    /** When on, hard-flush if the live server pos is too far sideways from look — avoids
+     *  hitting a delayed hitbox while the real body is off-angle (hitbox flags). */
+    private final BoolSetting hitboxFix = addSetting(new BoolSetting("Hitbox Fix", false));
     private final BoolSetting esp = addSetting(new BoolSetting("Esp", true));
-    private final BoolSetting packetVelocity = addSetting(new BoolSetting("Velocity", true));
-    private final BoolSetting packetVelocityExplosion = addSetting(new BoolSetting("ExplosionVelocity", true));
-    private final BoolSetting packetTimeUpdate = addSetting(new BoolSetting("TimeUpdate", true));
-    private final BoolSetting packetKeepAlive = addSetting(new BoolSetting("KeepAlive", true));
 
-    private final List<Packet<?>> packets = new ArrayList<>();
+    /** Max absolute yaw offset (deg) from look to real pos before Hitbox Fix flushes. */
+    private static final float HITBOX_FIX_MAX_YAW = 30.0f;
+
+    private final OutboundLagQueue inbound = new OutboundLagQueue();
     /** The entity you last attacked — BackTrack only ever tracks this (players only),
      *  mirroring the original gnuclient BackTrack's attack-packet-driven target. */
     private EntityLivingBase entity;
     private int targetEntityId = -1;
+    /** True while the post-attack window is open and target S14/S18 are being delayed. */
     private boolean blockPackets;
 
-    /** Per-hold delay, randomized between MinTime and MaxTime at the start of each hold. */
+    /** Per-hold packet age (ms), randomized between MinDelay and MaxDelay at hold start. */
     private long currentDelay;
 
     /**
-     * Timestamp of the initiating hit for the current hold. Set only when we are NOT already
-     * holding, so the post-attack window stays bounded to {@code HurtTime} after the first
-     * hit. Uses a BackTrack-private clock rather than {@link CombatAttackNotify#getLastAttackMs}
-     * because KillAura refreshes that timestamp on every attack — relying on it would extend
-     * the hold for as long as KillAura keeps hitting, freezing the target permanently until
-     * you walk out of range (which then also stops KillAura).
+     * Timestamp of the most recent hit on the tracked player. The queuing window stays open
+     * for {@code HurtTime} ms after this — refreshed on each attack so KillAura keeps a
+     * steady delay trail instead of pulse-freezing every HurtTime.
      */
     private long lastOwnAttackMs = 0L;
 
@@ -108,7 +95,7 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     /** True while inbound packets are being held (used by PingFix to keep ping in sync). */
     public boolean isLagging() {
-        return isEnabled() && blockPackets && !packets.isEmpty();
+        return isEnabled() && (blockPackets || !inbound.isEmpty());
     }
 
     public BacktrackModule() {
@@ -122,6 +109,8 @@ public final class BacktrackModule extends Module implements PacketListener {
     @Override
     public void onEnable() {
         blockPackets = false;
+        inbound.clear();
+        inbound.deactivate();
         currentDelay = (long) (float) maxTime.getValue();
         PacketEvents.register(this);
         WorldClient world = Mc.world();
@@ -142,13 +131,10 @@ public final class BacktrackModule extends Module implements PacketListener {
     @Override
     public void onDisable() {
         PacketEvents.unregister(this);
-        resetPackets();
-        packets.clear();
+        hardFlush();
         entity = null;
         targetEntityId = -1;
-        blockPackets = false;
         lastOwnAttackMs = 0L;
-        InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
     @Override
@@ -156,12 +142,10 @@ public final class BacktrackModule extends Module implements PacketListener {
         EntityPlayerSP player = Mc.player();
         WorldClient world = Mc.world();
         if (player == null || world == null) {
-            resetPackets();
+            hardFlush();
             entity = null;
-            blockPackets = false;
             return;
         }
-
 
         // Target = the entity you last attacked (set from the outgoing C02 ATTACK packet in
         // onSend), resolved against the current world. BackTrack tracks players only and
@@ -177,43 +161,52 @@ public final class BacktrackModule extends Module implements PacketListener {
         }
 
         if (entity == null) {
-            blockPackets = false;
-            resetPackets();
+            hardFlush();
             lastOwnAttackMs = 0L;
             return;
         }
 
         long now = System.currentTimeMillis();
 
-        // Old gnuclient BackTrack activation: packets are only held within the post-attack
-        // window (HurtTime ms after the initiating hit). Outside that window we never hold,
-        // so merely approaching a player does nothing — BackTrack is an attack aid. The window
-        // is measured from BackTrack's own initiating-hit clock (lastOwnAttackMs), NOT from
-        // CombatAttackNotify, so KillAura's continuous attacks can't keep extending the hold
-        // and permanently freeze the target. Taking knockback (hurtTime 3..9) pauses the hold
-        // so we stop delaying the moment we're hit.
+        // Queuing window = HurtTime ms after the initiating hit. Packet age = currentDelay.
+        // Window end / knockback / out-of-range → replay queued packets (no teleport snap).
         boolean inRange = player.getDistanceToEntity(entity) < hitRange.getValue();
         boolean withinAttackWindow = now - lastOwnAttackMs <= (long) (float) hurtTime.getValue();
         boolean takingKnockback = player.hurtTime >= 3 && player.hurtTime <= 9;
+        boolean shouldQueue = inRange && withinAttackWindow && !takingKnockback;
 
-        boolean shouldBlock = inRange && withinAttackWindow && !takingKnockback;
+        if (!shouldQueue) {
+            if (blockPackets || !inbound.isEmpty())
+                hardFlush();
+            return;
+        }
 
-        if (shouldBlock) {
-            if (!blockPackets) {
-                // Fresh hold: roll the randomized packet-delay value for the HUD.
-                float lo = Math.min(minTime.getValue(), maxTime.getValue());
-                float hi = Math.max(minTime.getValue(), maxTime.getValue());
-                currentDelay = (long) (lo + Math.random() * Math.max(0.0f, hi - lo));
-                InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK);
+        // Advantage / anti-flag flushes while a hold is active.
+        if (blockPackets || !inbound.isEmpty()) {
+            if (smartFlush.getValue() && shouldSmartFlush(player)) {
+                hardFlush();
+                lastOwnAttackMs = 0L;
+                return;
             }
-            blockPackets = true;
-        } else {
-            if (blockPackets) {
-                blockPackets = false;
-                resetPackets();
-                InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+            if (hitboxFix.getValue() && shouldHitboxFixFlush(player)) {
+                hardFlush();
+                lastOwnAttackMs = 0L;
+                return;
             }
         }
+
+        if (!blockPackets) {
+            float lo = Math.min(minTime.getValue(), maxTime.getValue());
+            float hi = Math.max(minTime.getValue(), maxTime.getValue());
+            currentDelay = (long) (lo + Math.random() * Math.max(0.0f, hi - lo));
+            inbound.activate();
+            InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK);
+            blockPackets = true;
+        }
+
+        // Trail by currentDelay during the window. Expired packets arrive ~1/tick in steady
+        // state, so a full releaseExpired pass stays smooth (no soft-drain backlog burst).
+        inbound.releaseExpired(currentDelay, PacketUtil::processInbound);
     }
 
     @Override
@@ -224,23 +217,23 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (use.getAction() != C02PacketUseEntity.Action.ATTACK)
             return false;
         // Record the attacked player as BackTrack's target (original gnuclient behavior:
-        // target is whoever you last hit, players only). Stamp the initiating-hit clock so the
-        // post-attack hold window opens even for manual clicks with KillAura off. Only stamp
-        // when we're not already holding, so continuous clicking (or KillAura's repeated hits)
-        // can't extend the hold forever — it stays bounded to HurtTime after the initiating hit.
+        // target is whoever you last hit, players only). Refresh the post-attack window on
+        // every hit — with age-release, extending the window trails by currentDelay instead
+        // of permanently freezing, and avoids HurtTime pulse stutter under KillAura.
         Entity attacked = use.getEntityFromWorld(Mc.world());
         if (attacked instanceof EntityPlayer) {
             entity = (EntityLivingBase) attacked;
             targetEntityId = attacked.getEntityId();
-            if (!blockPackets)
-                lastOwnAttackMs = System.currentTimeMillis();
+            lastOwnAttackMs = System.currentTimeMillis();
         }
         return false;
     }
 
     @Override
     public boolean onReceive(Object packet) {
-        if (!(packet instanceof Packet))
+        if (!(packet instanceof net.minecraft.network.Packet))
+            return false;
+        if (PacketUtil.isDispatching())
             return false;
         if (Mc.currentScreen() != null)
             return false;
@@ -249,15 +242,12 @@ public final class BacktrackModule extends Module implements PacketListener {
         // inbound stream. Yield to KnockbackDelay (highest) and Lagrange (middle) so the
         // three lag modules never queue packets simultaneously.
         if (InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.BACKTRACK)) {
-            if (!packets.isEmpty())
-                resetPackets();
-            blockPackets = false;
-            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+            hardFlush();
             return false;
         }
 
         if (packet instanceof S08PacketPlayerPosLook) {
-            resetPackets();
+            hardFlush();
             return false;
         }
 
@@ -296,13 +286,11 @@ public final class BacktrackModule extends Module implements PacketListener {
             }
         }
 
-        if (entity == null) {
-            resetPackets();
+        if (entity == null)
             return false;
-        }
 
         if (blockPackets && shouldQueue(packet)) {
-            packets.add((Packet<?>) packet);
+            inbound.offer(packet);
             return true;
         }
         return false;
@@ -310,7 +298,7 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     @Override
     public void onRender(float partialTicks) {
-        if (!esp.getValue() || entity == null || !blockPackets || !espServerValid || !Mc.isInGame())
+        if (!esp.getValue() || entity == null || !isLagging() || !espServerValid || !Mc.isInGame())
             return;
 
         double[] server = espServerPos(partialTicks);
@@ -384,61 +372,53 @@ public final class BacktrackModule extends Module implements PacketListener {
         return from + (to - from) * t;
     }
 
-    /** Whether a packet should be queued this hold. Only the target's movement/velocity and
-     *  a few global packets are delayed — never other entities' movement, so nearby players
-     *  (and KillAura's other candidates) keep updating and target selection isn't frozen. */
+    /** Whether a packet should be queued this hold. Only the target's S14/S18 movement
+     *  packets are delayed — all other packets pass through immediately. */
     private boolean shouldQueue(Object packet) {
-        // Never hold transactions — delaying S32 confirmations desyncs transaction-based
-        // anti-cheats and causes skipped/flagged packets (Post/Pre attack verification).
-        if (PacketHelper.isServerConfirmTransaction(packet))
-            return false;
-        // The target's own movement (S14/S18) is what we backtrack.
-        if (targetEntityId >= 0 && PacketHelper.isBacktrackQueueCandidate(packet, targetEntityId, Mc.world()))
-            return true;
-        // Global packets (time/keepalive/explosion) are safe to delay for everyone.
-        if (packet instanceof S03PacketTimeUpdate)
-            return packetTimeUpdate.getValue();
-        if (packet instanceof S00PacketKeepAlive)
-            return packetKeepAlive.getValue();
-        if (packet instanceof S27PacketExplosion)
-            return packetVelocityExplosion.getValue();
-        // The target's velocity only — other entities' knockback must stay live.
-        if (packet instanceof S12PacketEntityVelocity)
-            return packetVelocity.getValue()
-                    && ((S12PacketEntityVelocity) packet).getEntityID() == targetEntityId;
-        // Never hold swing/status-update (opcode 2) — holding it suppresses KillAura's
-        // swing animation and flags the attack as Post/Pre with autoblock.
-        if (packet instanceof S19PacketEntityStatus) {
-            S19PacketEntityStatus status = (S19PacketEntityStatus) packet;
-            return status.getOpCode() != 2;
-        }
-        return !(packet instanceof S06PacketUpdateHealth)
-                && !(packet instanceof S29PacketSoundEffect)
-                && !(packet instanceof S3EPacketTeams)
-                && !(packet instanceof S0CPacketSpawnPlayer);
+        return targetEntityId >= 0
+                && PacketHelper.isBacktrackQueueCandidate(packet, targetEntityId, Mc.world());
     }
 
-    private void resetPackets() {
-        if (packets.isEmpty())
-            return;
-        Object netHandler = Mc.netHandler();
-        while (!packets.isEmpty()) {
-            Packet<?> packet = packets.remove(0);
-            if (packet == null)
-                continue;
-            if (netHandler != null) {
-                try {
-                    PacketUtil.processInbound(packet);
-                } catch (Throwable ignored) {
-                }
-            }
-        }
+    /** True when live server position is strictly closer to the player than the delayed entity. */
+    private boolean shouldSmartFlush(EntityPlayerSP player) {
+        if (player == null || entity == null || !espServerValid)
+            return false;
+        double backDistSq = player.getDistanceSq(entity.posX, entity.posY, entity.posZ);
+        double realDistSq = player.getDistanceSq(espServerX, espServerY, espServerZ);
+        return realDistSq < backDistSq;
+    }
+
+    /** True when the live server body is too far sideways from the (silent) look yaw. */
+    private boolean shouldHitboxFixFlush(EntityPlayerSP player) {
+        if (player == null || !espServerValid)
+            return false;
+        double dx = espServerX - player.posX;
+        double dz = espServerZ - player.posZ;
+        if (dx * dx + dz * dz < 1.0e-6)
+            return false;
+        float yawToReal = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0f;
+        float lookYaw = RotationState.isActived()
+                ? RotationState.getRotationYawHead()
+                : player.rotationYaw;
+        float yawDiff = MathHelper.wrapAngleTo180_float(yawToReal - lookYaw);
+        return Math.abs(yawDiff) > HITBOX_FIX_MAX_YAW;
+    }
+
+    /**
+     * End the hold by replaying queued S14/S18 through vanilla handling (interpolation)
+     * instead of teleporting — {@code snapToServerPos} was the visible hitch.
+     */
+    private void hardFlush() {
+        inbound.deactivate();
+        blockPackets = false;
+        if (!inbound.isEmpty())
+            inbound.drainAll(PacketUtil::processInbound);
+        InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
     @Override
     public String[] getSuffix() {
-        // Show the rolled packet delay for the current hold (e.g. 353ms), so the delay
-        // BackTrack is applying is visible in the ArrayList.
+        // Show the rolled packet age for the current hold (e.g. 353ms).
         return new String[]{currentDelay + "ms"};
     }
 

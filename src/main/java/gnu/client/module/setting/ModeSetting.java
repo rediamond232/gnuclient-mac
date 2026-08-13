@@ -15,6 +15,14 @@ public final class ModeSetting extends Setting<Integer> {
         this.modes = Collections.unmodifiableList(modes);
     }
 
+    public ModeSetting(String name, String defaultMode, String... modes) {
+        this(name, java.util.Arrays.asList(modes).indexOf(defaultMode) >= 0 ? java.util.Arrays.asList(modes).indexOf(defaultMode) : 0, java.util.Arrays.asList(modes));
+    }
+
+    public ModeSetting(String name, int defaultIndex, String... modes) {
+        this(name, defaultIndex, java.util.Arrays.asList(modes));
+    }
+
     public List<String> getModes() {
         return modes;
     }

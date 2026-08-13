@@ -2,8 +2,10 @@ package gnu.client.module.modules.visual;
 
 import gnu.client.module.Category;
 import gnu.client.module.Module;
+import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.ui.ClientTheme;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.block.Block;
@@ -24,6 +26,7 @@ public final class BedEspModule extends Module {
     private static final int Y_RANGE = 4;
     private static final int SCAN_INTERVAL = 200;
 
+    private final BoolSetting useTheme = addSetting(new BoolSetting("Use Theme Colors", true));
     private final SliderSetting r = addSetting(new SliderSetting("Red", 255.0f, 0.0f, 255.0f));
     private final SliderSetting g = addSetting(new SliderSetting("Green", 85.0f, 0.0f, 255.0f));
     private final SliderSetting b = addSetting(new SliderSetting("Blue", 85.0f, 0.0f, 255.0f));
@@ -34,6 +37,9 @@ public final class BedEspModule extends Module {
 
     public BedEspModule() {
         super("BedESP", "Highlight nearby beds with configurable max distance", Category.VISUALS);
+        r.visibleWhen(() -> !useTheme.getValue());
+        g.visibleWhen(() -> !useTheme.getValue());
+        b.visibleWhen(() -> !useTheme.getValue());
     }
 
     @Override
@@ -113,9 +119,10 @@ public final class BedEspModule extends Module {
         double rvpY = vp[1];
         double rvpZ = vp[2];
 
-        float fr = r.getValue() / 255.0f;
-        float fg = g.getValue() / 255.0f;
-        float fb = b.getValue() / 255.0f;
+        float[] rgb = resolveColor();
+        float fr = rgb[0];
+        float fg = rgb[1];
+        float fb = rgb[2];
 
         RenderHelper.begin();
 
@@ -135,5 +142,16 @@ public final class BedEspModule extends Module {
         }
 
         RenderHelper.end();
+    }
+
+    private float[] resolveColor() {
+        if (useTheme.getValue()) {
+            return ClientTheme.rgbFloats(ClientTheme.getFadeColor(0));
+        }
+        return new float[] {
+                r.getValue() / 255.0f,
+                g.getValue() / 255.0f,
+                b.getValue() / 255.0f
+        };
     }
 }

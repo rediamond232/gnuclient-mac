@@ -14,6 +14,8 @@ public abstract class Setting<T> {
     private BooleanSupplier visibilityCondition;
     /** Optional live predicate — when true the setting is shown but greyed/locked. */
     private BooleanSupplier disabledCondition;
+    /** Fired after {@link #setValue} when the stored value actually changes. */
+    private Runnable changeListener;
 
     protected Setting(String name, T value) {
         this.name = name;
@@ -29,7 +31,25 @@ public abstract class Setting<T> {
     }
 
     public void setValue(T value) {
+        T previous = this.value;
         this.value = value;
+        if (changeListener == null) {
+            return;
+        }
+        if (previous == null ? value != null : !previous.equals(value)) {
+            changeListener.run();
+        }
+    }
+
+    /**
+     * Invoke {@code listener} after a real value change (GUI, config load, code).
+     *
+     * @return {@code this} for fluent use with {@code addSetting}
+     */
+    @SuppressWarnings("unchecked")
+    public final <S extends Setting<?>> S onChanged(Runnable listener) {
+        this.changeListener = listener;
+        return (S) this;
     }
 
     /**

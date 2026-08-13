@@ -317,4 +317,11 @@ public final class AutoClickerModule extends Module {
                                     int clickedButton, int mode, EntityPlayer player) {
         playerController.windowClick(windowId, slotId, clickedButton, mode, player);
     }
+
+    @Override
+    public String[] getSuffix() {
+        float lo = Math.min(minCps.getValue(), maxCps.getValue());
+        float hi = Math.max(minCps.getValue(), maxCps.getValue());
+        return new String[] { String.format("%.0f-%.0f", lo, hi) };
+    }
 }

@@ -24,14 +24,17 @@ public class HypixelVelocityTest {
     }
 
     @Test
-    public void restoresSprintOnlyWhileHurt() {
-        assertTrue(HypixelVelocity.shouldRestoreSprintAfterAttack(10));
-        assertFalse(HypixelVelocity.shouldRestoreSprintAfterAttack(0));
+    public void wallAbsorbOnlyWhileHurtNearSolid() {
+        assertTrue(HypixelVelocity.shouldWallAbsorb(5, 8, true));
+        assertFalse(HypixelVelocity.shouldWallAbsorb(5, 8, false));
+        assertFalse(HypixelVelocity.shouldWallAbsorb(5, 0, true));
+        assertFalse(HypixelVelocity.shouldWallAbsorb(0, 8, true));
     }
 
     @Test
     public void constants() {
         assertEquals(5, HypixelVelocity.DELAY_TICKS);
         assertEquals(3, HypixelVelocity.SETBACK_GRACE_TICKS);
+        assertEquals(0.35D, HypixelVelocity.WALL_ABSORB, 0.0);
     }
 }

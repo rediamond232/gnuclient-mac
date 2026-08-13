@@ -274,7 +274,7 @@ public class RotationHelper {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onPostInput(PostPlayerInputEvent event) {
-        // Yield to OpenMyau MoveFix (KillAura/Scaffold fixStrafe + moveFlying swap).
+        // Yield to OpenMyau MoveFix (KillAura/Displace fixStrafe + moveFlying swap).
         if (MoveFixHook.shouldUseServerMoveYaw())
             return;
 

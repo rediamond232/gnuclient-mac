@@ -3,6 +3,7 @@ package gnu.client.ui.menu;
 import gnu.client.GnuClientMod;
 import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.ui.ClientTheme;
+import gnu.client.ui.UiBlur;
 import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
 import net.minecraft.client.gui.GuiLanguage;
@@ -78,7 +79,7 @@ public class GnuMainMenuScreen extends GuiScreen {
 
     @Override
     public void onGuiClosed() {
-        // nothing persistent
+        UiBlur.endFrame();
     }
 
     private void applyVisualSettings() {
@@ -162,9 +163,23 @@ public class GnuMainMenuScreen extends GuiScreen {
             public void run() {
                 UiKit.prepareFixedPipeline();
                 drawBackdrop(fade);
-                drawBrand(fade, scale);
-                drawPanel(fade, scale);
-                drawFooter(fade, scale);
+                boolean blurOk = false;
+                ClickGuiModule gui = ClickGuiModule.instance();
+                boolean want = gui != null && gui.isBlurEnabled();
+                UiBlur.setEnabled(want);
+                try {
+                    if (want && UiBlur.isUsable()) {
+                        UiBlur.beginFrame(true);
+                        blurOk = UiBlur.isUsable();
+                    }
+                    drawBrand(fade, scale);
+                    drawPanel(fade, scale, blurOk);
+                    drawFooter(fade, scale, blurOk);
+                } finally {
+                    if (blurOk) {
+                        UiBlur.endFrame();
+                    }
+                }
                 UiKit.prepareFixedPipeline();
             }
         });
@@ -226,17 +241,25 @@ public class GnuMainMenuScreen extends GuiScreen {
                 ClientTheme.withAlpha(ClientTheme.color2(), alpha * 0.85f));
     }
 
-    private void drawPanel(float alpha, float scale) {
+    private void drawPanel(float alpha, float scale, boolean blurOk) {
         float px = UiKit.PixelAlign.snap(panelX, scale);
         float py = UiKit.PixelAlign.snap(panelY, scale);
         float pw = UiKit.PixelAlign.snap(PANEL_W, scale);
         float ph = UiKit.PixelAlign.snap(panelH, scale);
 
         UiKit.drawAccentGlow(px, py, pw, ph, PANEL_RADIUS, 0.4f * alpha);
-        UiKit.drawRoundedPanel(px + 2f, py + 2f, pw, ph, PANEL_RADIUS,
-                UiKit.withAlpha(0x66000000, alpha * 0.35f));
-        UiKit.drawRoundedPanel(px, py, pw, ph, PANEL_RADIUS,
-                UiKit.withAlpha(UiKit.PANEL, alpha));
+        if (blurOk) {
+            UiBlur.drawPanel(px, py, pw, ph, PANEL_RADIUS, alpha);
+            UiKit.drawRoundedPanel(px + 2f, py + 2f, pw, ph, PANEL_RADIUS,
+                    UiKit.withAlpha(0x66000000, alpha * 0.25f));
+            UiKit.drawRoundedPanel(px, py, pw, ph, PANEL_RADIUS,
+                    UiKit.withAlpha(UiKit.PANEL, alpha * 0.62f));
+        } else {
+            UiKit.drawRoundedPanel(px + 2f, py + 2f, pw, ph, PANEL_RADIUS,
+                    UiKit.withAlpha(0x66000000, alpha * 0.35f));
+            UiKit.drawRoundedPanel(px, py, pw, ph, PANEL_RADIUS,
+                    UiKit.withAlpha(UiKit.PANEL, alpha));
+        }
 
         // Header strip with C1→C2 underline (mirrors CategoryColumn)
         float headerH = 3f;
@@ -288,7 +311,7 @@ public class GnuMainMenuScreen extends GuiScreen {
                 labelColor);
     }
 
-    private void drawFooter(float alpha, float scale) {
+    private void drawFooter(float alpha, float scale, boolean blurOk) {
         String left = "GNU Client";
         String right = "Minecraft 1.8.9";
         float size = 6.5f;
@@ -310,8 +333,11 @@ public class GnuMainMenuScreen extends GuiScreen {
         languageW = lw;
         languageH = lh;
         boolean langHover = contains(lastMouseX, lastMouseY, lx, ly, lw, lh);
+        if (blurOk) {
+            UiBlur.drawSoftBehind(lx, ly, lw, lh, 6f, alpha);
+        }
         UiKit.drawRoundedPanel(lx, ly, lw, lh, 6f,
-                UiKit.withAlpha(langHover ? UiKit.ROW_HOVER : UiKit.ROW_IDLE, alpha * 0.85f));
+                UiKit.withAlpha(langHover ? UiKit.ROW_HOVER : UiKit.ROW_IDLE, alpha * (blurOk ? 0.55f : 0.85f)));
         UiFont.draw(lang,
                 UiKit.PixelAlign.snap(lx + (lw - UiFont.width(lang, size)) * 0.5f, scale),
                 UiKit.PixelAlign.snap(ly + (lh - UiFont.height(size)) * 0.5f, scale),

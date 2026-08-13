@@ -8,12 +8,10 @@ import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
-import gnu.client.utility.PacketUtils;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.item.EnumAction;
 import net.minecraft.item.ItemPotion;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.play.client.C09PacketHeldItemChange;
 
 import java.util.Arrays;
 import java.util.List;
@@ -42,9 +40,8 @@ public final class NoSlowModule extends Module {
     private final SliderSetting bowMotion = addSetting(new SliderSetting("bow-motion", 100f, 0f, 100f, 1f));
     private final BoolSetting bowSprint = addSetting(new BoolSetting("bow-sprint", true));
 
-    private boolean spoofingSlot;
-    private boolean toggleSlot;
-    private int lastSentSlot = -1;
+    private final GrimNoSlowController grimController = new GrimNoSlowController();
+    private final GrimFoodNoSlowController foodController = new GrimFoodNoSlowController();
 
     public NoSlowModule() {
         super("NoSlow", "Cancel item-use slowdown (sword/food/bow)", Category.PLAYER);
@@ -60,6 +57,12 @@ public final class NoSlowModule extends Module {
     public static NoSlowModule instance() {
         Module module = ModuleManager.instance().getModule("NoSlow");
         return module instanceof NoSlowModule ? (NoSlowModule) module : null;
+    }
+
+    public static void onGrimPreMovement() {
+        NoSlowModule inst = instance();
+        if (inst != null && inst.isEnabled())
+            inst.grimController.onGrimPreMovement(inst);
     }
 
     public boolean isSwordActive() {
@@ -81,19 +84,52 @@ public final class NoSlowModule extends Module {
         return bowMode.getValue() != MODE_NONE && Mc.isHoldingBow();
     }
 
+    /** Sword Path A GRIM — independent of food GRIM. */
+    public boolean isSwordGrimActive() {
+        return isSwordGrimActive(swordMode.getValue(), isSwordActive());
+    }
+
+    /** Food-mode setting is GRIM (ignores whether currently holding food). */
+    public boolean isFoodGrimMode() {
+        return foodMode.getValue() == MODE_GRIM;
+    }
+
+    /** Food-mode GRIM selected while holding a consumable (not FSM EATING yet). */
+    public boolean isFoodGrimSelected() {
+        return isFoodGrimSelected(foodMode.getValue(), isEating());
+    }
+
+    static boolean isSwordGrimActive(int swordModeValue, boolean swordActive) {
+        return swordModeValue == MODE_GRIM && swordActive;
+    }
+
+    static boolean isFoodGrimSelected(int foodModeValue, boolean eating) {
+        return foodModeValue == MODE_GRIM && eating;
+    }
+
+    /**
+     * Any GRIM category selected for current item. Sword Path A uses {@link #isSwordGrimActive()};
+     * food Via path uses {@link #isFoodGrimSelected()} + food controller full-speed.
+     */
     public boolean isGrimMode() {
-        return (swordMode.getValue() == MODE_GRIM && Mc.isHoldingSword())
-            || (foodMode.getValue() == MODE_GRIM && isEating());
+        return isSwordGrimActive() || isFoodGrimSelected();
     }
 
     public boolean isAnyActive() {
-        if (isGrimMode())
+        if (isSwordGrimActive())
             return Mc.isUsingItem();
+        if (isFoodGrimSelected() && foodFullSpeed())
+            return true;
         return Mc.isUsingItem() && (isSwordActive() || isFoodActive() || isBowActive());
     }
 
+    /** Food Via FSM EATING. */
+    boolean foodFullSpeed() {
+        return foodController.shouldFullSpeed();
+    }
+
     public boolean canSprint() {
-        if (isGrimMode())
+        if (isSwordGrimActive() || foodFullSpeed())
             return true;
         return (isSwordActive() && swordSprint.getValue())
             || (isFoodActive() && foodSprint.getValue())
@@ -101,7 +137,7 @@ public final class NoSlowModule extends Module {
     }
 
     public int getMotionMultiplier() {
-        if (isGrimMode()) {
+        if (isSwordGrimActive() || foodFullSpeed()) {
             if (Mc.isHoldingSword())
                 return Math.round(swordMotion.getValue());
             if (isEating())
@@ -118,72 +154,28 @@ public final class NoSlowModule extends Module {
 
     @Override
     public void onEnable() {
-        resetSlotSpoof();
+        grimController.onEnable();
+        foodController.onEnable();
     }
 
     @Override
     public void onDisable() {
-        resetSlotSpoof();
+        grimController.onDisable();
+        foodController.onDisable();
     }
 
     @Override
     public void onTickStart() {
-        if (isGrimMode() && Mc.isUsingItem() && !KillAuraModule.isAutoBlockHandlingBlock()) {
-            updateGrimSlotSpoof();
-        } else {
-            resetSlotSpoof();
-        }
+        grimController.onClientTickStart();
+        foodController.onClientTickStart();
     }
 
     @Override
-    public void onTick() {}
-
-    /**
-     * wsamiaw Grim NoSlow: alternate C09 selected slot while using the item so Grim's
-     * slot-change check keeps the NoSlow flag from accumulating.
-     */
-    private void updateGrimSlotSpoof() {
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-        int item = player.inventory.currentItem;
-        if (!spoofingSlot) {
-            spoofingSlot = true;
-            toggleSlot = true;
-            lastSentSlot = -1;
-        }
-        int target = nextGrimSlot(item, swapSlot(), toggleSlot, lastSentSlot);
-        PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(target));
-        lastSentSlot = target;
-        toggleSlot = !toggleSlot;
+    public void onTick() {
+        foodController.onTick(this);
     }
-
-    private void resetSlotSpoof() {
-        EntityPlayerSP player = Mc.player();
-        if (spoofingSlot && player != null) {
-            int item = player.inventory.currentItem;
-            if (item != lastSentSlot)
-                PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(item));
-        }
-        spoofingSlot = false;
-        toggleSlot = false;
-        lastSentSlot = -1;
-    }
-
-    private int swapSlot() {
-        int slot = 1;
-        Module module = ModuleManager.instance().getModule("NoSlow");
-        if (module instanceof NoSlowModule) {
-            // Existing wsamiaw default is slot 1; keep the same default without adding a GUI setting.
-        }
-        return slot;
-    }
-
     static int nextGrimSlot(int currentSlot, int swapSlot, boolean toggle, int lastSentSlot) {
-        int target = toggle ? swapSlot : currentSlot;
-        if (target == lastSentSlot)
-            target = (target + 1) % 9;
-        return target;
+        return GrimNoSlowController.nextSlot(currentSlot, swapSlot, toggle, lastSentSlot);
     }
 
     /**
@@ -213,5 +205,16 @@ public final class NoSlowModule extends Module {
         if (splashPotion)
             return false;
         return action == EnumAction.EAT || action == EnumAction.DRINK;
+    }
+
+    @Override
+    public String[] getSuffix() {
+        if (swordMode.getValue() != MODE_NONE)
+            return new String[] { swordMode.getCurrentMode() };
+        if (foodMode.getValue() != MODE_NONE)
+            return new String[] { foodMode.getCurrentMode() };
+        if (bowMode.getValue() != MODE_NONE)
+            return new String[] { bowMode.getCurrentMode() };
+        return new String[0];
     }
 }

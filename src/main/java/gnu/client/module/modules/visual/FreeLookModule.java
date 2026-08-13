@@ -243,8 +243,8 @@ public final class FreeLookModule extends Module implements PacketListener {
     // ── Packet interceptor (silent rotation — real body yaw/pitch only) ──
     //
     // Freelook camera angles are client-only. Player rotationYaw/rotationPitch stay
-    // frozen at the direction you faced when freelook started (or wherever another
-    // module like scaffold wrote them). Packets always carry that real rotation.
+    // frozen at the direction you faced when freelook started. Packets always carry
+    // that real rotation.
     //
     // Never cancels or re-queues — lag/blink/backtrack modules are unaffected.
 

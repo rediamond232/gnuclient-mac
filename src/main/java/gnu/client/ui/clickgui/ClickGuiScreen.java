@@ -24,21 +24,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Lux ClickGUI orchestrator: searchable top bar, z-ordered draggable category columns,
- * and setting UX via {@link CategoryColumn} / {@link ModuleRow} / {@link SettingInteraction}.
+ * Classic dropdown ClickGUI: z-ordered draggable category columns and settings.
  */
 public class ClickGuiScreen extends GuiScreen {
-
-    private static final float TOP_BAR_H = 36f;
-    private static final float TOP_BAR_Y = 10f;
-    private static final float SEARCH_W = 240f;
 
     private final List<CategoryColumn> columns = new ArrayList<CategoryColumn>();
     private final UiKit.UiClock clock = new UiKit.UiClock();
     private final UiKit.ScissorStack scissors = new UiKit.ScissorStack();
+    private final UiKit.AnimatedFloat openFade = new UiKit.AnimatedFloat(0f);
 
-    private String search = "";
-    private boolean searchFocused;
     private int nextZ = 1;
     private boolean layoutDirty;
     private List<CategoryColumn> zOrderCache;
@@ -83,11 +77,12 @@ public class ClickGuiScreen extends GuiScreen {
         rebuild();
         resetTransient();
         clock.reset();
+        openFade.snap(0f);
+        openFade.setDurationMs(280f, 1f);
+        openFade.setTarget(1f);
     }
 
     private void resetTransient() {
-        search = "";
-        searchFocused = false;
         layoutDirty = false;
         ClientBootstrap.cancelRebind();
         for (CategoryColumn column : columns) {
@@ -99,8 +94,6 @@ public class ClickGuiScreen extends GuiScreen {
     public void onGuiClosed() {
         persistAllLayout();
         ClientBootstrap.cancelRebind();
-        search = "";
-        searchFocused = false;
         for (CategoryColumn column : columns) {
             column.resetTransient();
         }
@@ -154,34 +147,50 @@ public class ClickGuiScreen extends GuiScreen {
         applyVisualSettings();
         clock.tick();
         float dt = clock.dt();
-        float alpha = panelAlpha();
+        openFade.update(dt);
+        float alpha = panelAlpha() * UiKit.clamp01(openFade.get());
         boolean blur = UiBlur.isEnabled();
 
         int lx = logicalX(mouseX);
         int ly = logicalY(mouseY);
         for (CategoryColumn column : columns) {
-            column.update(dt, lx, ly, search);
+            column.update(dt, lx, ly, "");
             column.mouseDragged(lx, ly);
         }
 
-        final ScaledResolution sr = new ScaledResolution(mc);
-        final float scale = sr.getScaleFactor();
         final float panelAlpha = alpha;
         final boolean wantBlur = blur;
-        final String searchQuery = search;
-        final int logicalScreenW = Math.round(sr.getScaledWidth() / userScale());
+        final ScaledResolution sr = new ScaledResolution(mc);
+        final float scale = sr.getScaleFactor();
         UiKit.GlGuard.run(new Runnable() {
             @Override
             public void run() {
                 UiBlur.beginFrame(wantBlur);
+                boolean blurOk = wantBlur && UiBlur.isUsable();
+                if (blurOk) {
+                    UiBlur.drawFullscreen(1f);
+                }
+                // Soft world dim behind panels (scaled by open fade)
+                float dimA = UiKit.clamp01(openFade.get()) * (blurOk ? 0.22f : 0.40f);
+                if (dimA > 0.01f) {
+                    float logicalW = width / userScale();
+                    float logicalH = height / userScale();
+                    GlStateManager.pushMatrix();
+                    try {
+                        GlStateManager.scale(userScale(), userScale(), 1f);
+                        UiKit.drawRoundedPanel(0f, 0f, logicalW, logicalH, 0f,
+                                UiKit.withAlpha(0xFF000000, dimA));
+                    } finally {
+                        GlStateManager.popMatrix();
+                    }
+                }
                 GlStateManager.pushMatrix();
                 try {
                     GlStateManager.scale(userScale(), userScale(), 1f);
-                    drawTopBar(logicalScreenW, panelAlpha, scale);
                     List<CategoryColumn> ordered = sortedByZ();
                     for (CategoryColumn column : ordered) {
-                        column.render(panelAlpha, scale, userScale(), searchQuery,
-                                wantBlur && UiBlur.isUsable(), scissors);
+                        column.render(panelAlpha, scale, userScale(), "",
+                                blurOk, scissors);
                     }
                 } finally {
                     GlStateManager.popMatrix();
@@ -192,53 +201,6 @@ public class ClickGuiScreen extends GuiScreen {
         });
 
         super.drawScreen(mouseX, mouseY, partialTicks);
-    }
-
-    private void drawTopBar(int screenW, float alpha, float scale) {
-        float barW = Math.min(480f, screenW - 24f);
-        float barX = (screenW - barW) * 0.5f;
-        float barY = TOP_BAR_Y;
-        float bx = UiKit.PixelAlign.snap(barX, scale);
-        float by = UiKit.PixelAlign.snap(barY, scale);
-        float bw = UiKit.PixelAlign.snap(barW, scale);
-        float bh = UiKit.PixelAlign.snap(TOP_BAR_H, scale);
-
-        UiKit.drawRoundedPanel(bx, by, bw, bh, 14f, UiKit.withAlpha(UiKit.SURFACE_STRONG, alpha));
-
-        UiFont.draw("GNUClient", UiKit.PixelAlign.snap(bx + 14f, scale),
-                UiKit.PixelAlign.snap(by + 8f, scale),
-                UiKit.withAlpha(UiKit.TEXT, alpha));
-        UiFont.draw("LUX INTERFACE",
-                UiKit.PixelAlign.snap(bx + 14f, scale),
-                UiKit.PixelAlign.snap(by + 20f, scale),
-                7f, UiKit.withAlpha(UiKit.MUTED, alpha));
-
-        float searchW = Math.min(SEARCH_W, barW * 0.48f);
-        float searchX = bx + (bw - searchW) * 0.5f;
-        float searchY = by + 7f;
-        float searchH = 22f;
-        UiKit.drawRoundedPanel(searchX, searchY, searchW, searchH, 11f,
-                UiKit.withAlpha(searchFocused ? 0x228B5CF6 : 0x12FFFFFF, alpha));
-
-        String shown = search.isEmpty() && !searchFocused ? "Search modules..." : search;
-        int color = search.isEmpty() && !searchFocused
-                ? UiKit.withAlpha(0xFF676E7D, alpha)
-                : UiKit.withAlpha(UiKit.TEXT, alpha);
-        UiFont.draw(shown,
-                UiKit.PixelAlign.snap(searchX + 10f, scale),
-                UiKit.PixelAlign.snap(searchY + (searchH - UiFont.height()) * 0.5f, scale),
-                color);
-    }
-
-    private boolean searchHit(int mouseX, int mouseY) {
-        float screenW = width / userScale();
-        float barW = Math.min(480f, screenW - 24f);
-        float barX = (screenW - barW) * 0.5f;
-        float searchW = Math.min(SEARCH_W, barW * 0.48f);
-        float searchX = barX + (barW - searchW) * 0.5f;
-        float searchY = TOP_BAR_Y + 7f;
-        return mouseX >= searchX && mouseX <= searchX + searchW
-                && mouseY >= searchY && mouseY <= searchY + 22f;
     }
 
     private List<CategoryColumn> sortedByZ() {
@@ -266,17 +228,12 @@ public class ClickGuiScreen extends GuiScreen {
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws IOException {
         int lx = logicalX(mouseX);
         int ly = logicalY(mouseY);
-        if (searchHit(lx, ly)) {
-            searchFocused = true;
-            return;
-        }
-        searchFocused = false;
 
         for (CategoryColumn column : sortedByZDesc()) {
             if (column.containsPoint(lx, ly)) {
                 if (column.bringToFront(nextZ++))
                     zOrderDirty = true;
-                column.mouseClicked(lx, ly, mouseButton, search);
+                column.mouseClicked(lx, ly, mouseButton, "");
                 layoutDirty = true;
                 return;
             }
@@ -317,7 +274,7 @@ public class ClickGuiScreen extends GuiScreen {
         int lx = logicalX(mouseX);
         int ly = logicalY(mouseY);
         for (CategoryColumn column : sortedByZDesc()) {
-            if (column.handleScroll(lx, ly, wheel, search)) {
+            if (column.handleScroll(lx, ly, wheel, "")) {
                 return;
             }
         }
@@ -325,7 +282,6 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException {
-        // Screen owns rebind while open.
         if (ClientBootstrap.isRebindActive()) {
             if (keyCode == Keyboard.KEY_ESCAPE) {
                 ClientBootstrap.cancelRebind();
@@ -345,22 +301,6 @@ public class ClickGuiScreen extends GuiScreen {
                     ClientBootstrap.setModuleKeyCode(name, keyCode);
                 }
                 ClientBootstrap.cancelRebind();
-                return;
-            }
-            return;
-        }
-
-        if (searchFocused) {
-            if (keyCode == Keyboard.KEY_ESCAPE || keyCode == Keyboard.KEY_RETURN) {
-                searchFocused = false;
-                return;
-            }
-            if (keyCode == Keyboard.KEY_BACK && !search.isEmpty()) {
-                search = search.substring(0, search.length() - 1);
-                return;
-            }
-            if (typedChar >= 32 && typedChar != 127) {
-                search = search + typedChar;
                 return;
             }
             return;

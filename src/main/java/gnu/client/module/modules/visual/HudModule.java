@@ -12,7 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * In-game HUD overlay listing enabled modules and toast notifications.
+ * In-game HUD overlay: Tux watermark, ArrayList, TargetHUD, and toast notifications.
  * Rendering is delegated to {@link HudRenderer}; toggle callbacks are
  * identity-only dirty signals (the enabled boolean is untrusted).
  */
@@ -20,12 +20,14 @@ public final class HudModule extends Module {
 
     private static HudModule instance;
 
+    private final BoolSetting showWatermark = addSetting(new BoolSetting("Watermark", true));
     private final BoolSetting showArray = addSetting(new BoolSetting("Array", true));
+    private final BoolSetting showTargetHud = addSetting(new BoolSetting("TargetHUD", true));
     private final BoolSetting showNotifications = addSetting(new BoolSetting("Notifications", true));
     private final BoolSetting showSuffixes = addSetting(new BoolSetting("Show suffixes", true));
 
     public HudModule() {
-        super("HUD", "Enabled module list and toggle notifications", Category.VISUALS);
+        super("HUD", "Watermark, ArrayList, TargetHUD and toggle notifications", Category.VISUALS);
         instance = this;
         showSuffixes.visibleWhen(() -> showArray.getValue());
     }
@@ -43,8 +45,16 @@ public final class HudModule extends Module {
         // no-op — mark already done in Module.setEnabled on real transitions
     }
 
+    public boolean wantsWatermark() {
+        return showWatermark.getValue();
+    }
+
     public boolean wantsArray() {
         return showArray.getValue();
+    }
+
+    public boolean wantsTargetHud() {
+        return showTargetHud.getValue();
     }
 
     public boolean wantsNotifications() {
@@ -65,7 +75,7 @@ public final class HudModule extends Module {
         if (hud == null || !hud.isEnabled()) {
             return false;
         }
-        if (hud.wantsArray()) {
+        if (hud.wantsWatermark() || hud.wantsArray() || hud.wantsTargetHud()) {
             return true;
         }
         return hud.wantsNotifications() && hasActiveNotifications();

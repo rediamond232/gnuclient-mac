@@ -198,7 +198,7 @@ public class ConfigManagerTest {
                 failuresRemaining--;
                 throw new IOException("expected test failure");
             }
-            lastRoot = root.deepCopy();
+            lastRoot = new Gson().fromJson(root, JsonObject.class);
         }
     }
 

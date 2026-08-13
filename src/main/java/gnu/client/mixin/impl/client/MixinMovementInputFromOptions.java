@@ -63,7 +63,7 @@ public class MixinMovementInputFromOptions extends MovementInput {
             this.moveForward = (float) ((double) this.moveForward * sneakMultiplier);
         }
 
-        // Forge mixin hook: BridgeAssist / Velocity JumpReset / WTap / Scaffold / scripts.
+        // Forge mixin hook: BridgeAssist / Velocity JumpReset / WTap / scripts.
         MovementInputHook.afterUpdatePlayerMoveState(this);
     }
 

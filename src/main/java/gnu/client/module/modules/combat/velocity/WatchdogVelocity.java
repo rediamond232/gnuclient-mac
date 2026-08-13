@@ -10,15 +10,16 @@ import net.minecraft.network.play.server.S00PacketKeepAlive;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S32PacketConfirmTransaction;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public final class WatchdogVelocity extends VelocityMode {
 
-    private boolean active;
-    private boolean receiving;
+    private volatile boolean active;
+    private volatile boolean receiving;
     private int offGroundTicks;
-    private final List<Object> packets = new ArrayList<>();
+    /** Filled on the Netty I/O thread, drained on the client thread — see {@link HypixelVelocity}. */
+    private final Queue<Object> packets = new ConcurrentLinkedQueue<>();
     private int amount;
 
     public WatchdogVelocity(VelocityModule parent) {
@@ -120,10 +121,10 @@ public final class WatchdogVelocity extends VelocityMode {
         receiving = true;
         double mX = player.motionX;
         double mZ = player.motionZ;
-        for (Object packet : packets) {
+        Object packet;
+        while ((packet = packets.poll()) != null) {
             PacketUtil.processInbound(packet);
         }
-        packets.clear();
         player.motionX = mX;
         player.motionZ = mZ;
         receiving = false;

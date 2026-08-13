@@ -8,12 +8,16 @@ import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.item.ItemSword;
+import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.C02PacketUseEntity;
 import net.minecraft.network.play.client.C08PacketPlayerBlockPlacement;
+import net.minecraft.network.play.client.C0APacketAnimation;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.util.AxisAlignedBB;
 
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
 public final class GrimReduceVelocity extends VelocityMode {
 
@@ -40,8 +44,25 @@ public final class GrimReduceVelocity extends VelocityMode {
         // in this flying window (often a different entity than KA's Switch target).
         if (KillAuraModule.getCurrentTarget() != null)
             return false;
-        PacketUtils.sendPacketNoEvent(new C02PacketUseEntity(target, C02PacketUseEntity.Action.ATTACK));
+        // Grim reduce: C02 ATTACK then C0A swing (C02 > C0A) — both required.
+        for (Packet<?> outbound : reduceAttackPackets(target))
+            PacketUtils.sendPacketNoEvent(outbound);
         return false;
+    }
+
+    /** Ordered outbound pair for GrimReduce: C02 then C0A. */
+    static List<Packet<?>> reduceAttackPackets(Entity target) {
+        return Arrays.asList(
+                new C02PacketUseEntity(target, C02PacketUseEntity.Action.ATTACK),
+                new C0APacketAnimation());
+    }
+
+    /** Simple names in the order {@link #reduceAttackPackets} sends (C02 > C0A). */
+    static String[] reduceAttackPacketOrder() {
+        return new String[] {
+                C02PacketUseEntity.class.getSimpleName(),
+                C0APacketAnimation.class.getSimpleName()
+        };
     }
 
     @Override

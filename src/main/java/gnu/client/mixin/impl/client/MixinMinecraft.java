@@ -2,9 +2,12 @@ package gnu.client.mixin.impl.client;
 
 import gnu.client.event.*;
 import gnu.client.helper.RotationHelper;
+import gnu.client.mixin.impl.accessors.IAccessorRenderGlobal;
 import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.runtime.FreeLookHook;
 import gnu.client.ui.menu.GnuMainMenuScreen;
+import gnu.client.render.graphics.GraphicsReload;
+import gnu.client.render.graphics.lights.DynamicLights;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
@@ -15,6 +18,7 @@ import net.minecraft.util.MovingObjectPosition;
 import net.minecraftforge.common.MinecraftForge;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -101,7 +105,7 @@ public class MixinMinecraft {
             settings.particleSetting = 2;
         }
         if (PerformanceModule.forceVbo() && OpenGlHelper.vboSupported) {
-            settings.useVbo = true;
+            gnu$ensureVboSkySynced(mc, settings);
         }
         if (PerformanceModule.entityShadowsOff()) {
             settings.entityShadows = false;
@@ -125,6 +129,30 @@ public class MixinMinecraft {
         }
         if (PerformanceModule.dynamicRenderDistance()) {
             gnu$applyDynamicRenderDistance(settings);
+        }
+        DynamicLights.tick();
+    }
+
+    @Inject(method = "refreshResources", at = @At("RETURN"))
+    private void gnu$graphicsReload(CallbackInfo ci) {
+        GraphicsReload.reload();
+    }
+
+    /**
+     * Force VBO without rebuilding sky/star geometry leaves RenderGlobal.vboEnabled out of
+     * sync with GameSettings.useVbo — stars then draw as black cubes (especially on macOS).
+     * Only call loadRenderers when the mode actually flips.
+     */
+    @Unique
+    private static void gnu$ensureVboSkySynced(Minecraft mc, GameSettings settings) {
+        settings.useVbo = true;
+        if (mc.renderGlobal == null) {
+            return;
+        }
+        // Sky/star meshes are built for either VBO or display-list mode. Flipping useVbo
+        // without loadRenderers leaves stars drawing with the wrong path → black cubes.
+        if (!((IAccessorRenderGlobal) mc.renderGlobal).isVboEnabled() && OpenGlHelper.useVbo()) {
+            mc.renderGlobal.loadRenderers();
         }
     }
 

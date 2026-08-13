@@ -194,4 +194,9 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         if (lag instanceof LagrangeModule && lag.isEnabled())
             ((LagrangeModule) lag).flushQueueNow();
     }
+
+    @Override
+    public String[] getSuffix() {
+        return new String[] { ((long) (float) maximumDelay.getValue()) + "ms" };
+    }
 }

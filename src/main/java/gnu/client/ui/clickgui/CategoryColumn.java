@@ -3,6 +3,7 @@ package gnu.client.ui.clickgui;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
+import gnu.client.ui.ClientTheme;
 import gnu.client.ui.UiBlur;
 import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
@@ -18,10 +19,13 @@ import java.util.Locale;
  */
 public final class CategoryColumn {
 
-    public static final float WIDTH = UiKit.COLUMN_WIDTH;
-    public static final float HEADER_H = 42f;
-    public static final float BODY_PAD = 6f;
-    public static final float MAX_BODY_H = 320f;
+    public static final float WIDTH = 128f;
+    public static final float HEADER_H = 22f;
+    public static final float BODY_PAD = 4f;
+    public static final float ROW_GAP = 2f;
+    public static final float MAX_BODY_H = 300f;
+    /** Extra scissor padding so module bloom isn't clipped away. */
+    private static final float GLOW_PAD = 20f;
 
     private final Category category;
     private final List<ModuleRow> rows = new ArrayList<ModuleRow>();
@@ -157,7 +161,7 @@ public final class CategoryColumn {
                     && contains(mouseX, mouseY, x + BODY_PAD, rowY, WIDTH - BODY_PAD * 2f, h)
                     && mouseY >= bodyTop && mouseY < bodyTop + clipH;
             row.update(dt, hovered);
-            rowY += h + 2f;
+            rowY += h + ROW_GAP;
         }
     }
 
@@ -185,7 +189,7 @@ public final class CategoryColumn {
             if (!matchesSearch(row, search)) {
                 continue;
             }
-            h += row.visibleHeight() + 2f;
+            h += row.visibleHeight() + ROW_GAP;
         }
         return h;
     }
@@ -236,7 +240,7 @@ public final class CategoryColumn {
                 return row.mouseClicked(x + BODY_PAD, rowY, WIDTH - BODY_PAD * 2f,
                         mouseX, mouseY, button);
             }
-            rowY += h + 2f;
+            rowY += h + ROW_GAP;
         }
         return true;
     }
@@ -258,7 +262,7 @@ public final class CategoryColumn {
         }
         for (ModuleRow row : rows) {
             if (row.isDraggingSetting()) {
-                row.mouseDragged(mouseX);
+                row.mouseDragged(mouseX, mouseY);
             }
         }
     }
@@ -291,41 +295,33 @@ public final class CategoryColumn {
         float py = UiKit.PixelAlign.snap(y, scale);
         float pw = UiKit.PixelAlign.snap(WIDTH, scale);
         float ph = UiKit.PixelAlign.snap(h, scale);
+        float radius = 5f;
+
+        // Soft outer glow around the whole panel
+        UiKit.drawAccentGlow(px, py, pw, ph, radius, 0.55f * alpha);
 
         if (useBlur) {
-            UiBlur.drawPanel(px, py, pw, ph, UiKit.RADIUS_PANEL, alpha, userScale);
+            UiBlur.drawPanel(px, py, pw, ph, radius, alpha, userScale);
+            // Keep the same panel color language; slightly lower alpha so blur shows through
+            UiKit.drawRoundedPanel(px + 2f, py + 2f, pw, ph, radius, UiKit.withAlpha(0x66000000, alpha * 0.25f));
+            UiKit.drawRoundedPanel(px, py, pw, ph, radius, UiKit.withAlpha(UiKit.PANEL, alpha * 0.62f));
         } else {
-            UiKit.drawRoundedPanel(px, py, pw, ph, UiKit.RADIUS_PANEL,
-                    UiKit.withAlpha(UiKit.SURFACE, alpha));
+            UiKit.drawRoundedPanel(px + 2f, py + 2f, pw, ph, radius, UiKit.withAlpha(0x66000000, alpha * 0.4f));
+            UiKit.drawRoundedPanel(px, py, pw, ph, radius, UiKit.withAlpha(UiKit.PANEL, alpha));
         }
-        // Soft top highlight strip
-        UiKit.drawRoundedPanel(px + 1f, py + 1f, pw - 2f, HEADER_H - 1f, UiKit.RADIUS_PANEL - 1f,
-                UiKit.withAlpha(0x0AFFFFFF, alpha));
-        // Header separator
-        UiKit.drawRoundedPanel(px + 10f, py + HEADER_H - 1f, pw - 20f, 1f, 0f,
-                UiKit.withAlpha(UiKit.LINE, alpha));
+        UiKit.drawGlowRect(px, py, pw, HEADER_H, radius, ClientTheme.color1(), 0.4f * alpha);
 
-        // Header title + count badge
+        // Header
+        UiKit.drawRoundedPanel(px, py, pw, HEADER_H, radius, UiKit.withAlpha(UiKit.PANEL_HEADER, alpha));
+        UiKit.drawRoundedPanel(px, py + HEADER_H - 6f, pw, 6f, 0f, UiKit.withAlpha(UiKit.PANEL_HEADER, alpha));
+        UiKit.drawHorizontalGradient(px + 8f, py + HEADER_H - 2f, pw - 16f, 1.5f,
+                ClientTheme.withAlpha(ClientTheme.color1(), alpha),
+                ClientTheme.withAlpha(ClientTheme.color2(), alpha));
+
         String title = prettyCategory(category);
-        float titleY = UiKit.PixelAlign.snap(py + 12f, scale);
-        UiFont.draw(title, UiKit.PixelAlign.snap(px + 12f, scale), titleY,
+        float titleY = UiKit.PixelAlign.snap(py + (HEADER_H - UiFont.height(8f)) * 0.5f, scale);
+        UiFont.draw(title, UiKit.PixelAlign.snap(px + 8f, scale), titleY, 8f,
                 UiKit.withAlpha(UiKit.TEXT, alpha));
-        UiFont.draw(categorySubtitle(category),
-                UiKit.PixelAlign.snap(px + 12f, scale),
-                UiKit.PixelAlign.snap(py + 24f, scale),
-                7.5f, UiKit.withAlpha(UiKit.MUTED, alpha));
-
-        String count = String.valueOf(visibleRowCount(search));
-        float badgeW = Math.max(18f, UiFont.width(count, 8f) + 10f);
-        float badgeH = 14f;
-        float badgeX = px + pw - 12f - badgeW;
-        float badgeY = py + (HEADER_H - badgeH) * 0.5f;
-        UiKit.drawRoundedPanel(badgeX, badgeY, badgeW, badgeH, 6f,
-                UiKit.withAlpha(0x14FFFFFF, alpha));
-        float cw = UiFont.width(count, 8f);
-        UiFont.draw(count, UiKit.PixelAlign.snap(badgeX + (badgeW - cw) * 0.5f, scale),
-                UiKit.PixelAlign.snap(badgeY + (badgeH - UiFont.height(8f)) * 0.5f, scale),
-                8f, UiKit.withAlpha(0xFFB8BDC9, alpha));
 
         if (openAmt < 0.02f) {
             return;
@@ -336,7 +332,10 @@ public final class CategoryColumn {
         Minecraft mc = Minecraft.getMinecraft();
         int displayW = mc != null ? mc.displayWidth : 0;
         int displayH = mc != null ? mc.displayHeight : 0;
-        scissors.pushScaled(px, bodyTop, pw, clipH, scale * userScale, displayW, displayH);
+        // Inflate scissor so enabled-module bloom isn't cut off at the panel edge
+        scissors.pushScaled(px - GLOW_PAD, bodyTop - GLOW_PAD,
+                pw + GLOW_PAD * 2f, clipH + GLOW_PAD * 2f,
+                scale * userScale, displayW, displayH);
         try {
             float rowY = bodyTop + BODY_PAD - scroll;
             for (ModuleRow row : rows) {
@@ -344,10 +343,10 @@ public final class CategoryColumn {
                     continue;
                 }
                 float rh = row.visibleHeight();
-                if (rowY + rh >= bodyTop - 2f && rowY <= bodyTop + clipH + 2f) {
+                if (rowY + rh >= bodyTop - 4f && rowY <= bodyTop + clipH + 4f) {
                     row.render(px + BODY_PAD, rowY, pw - BODY_PAD * 2f, alpha * openAmt, scale);
                 }
-                rowY += rh + 2f;
+                rowY += rh + ROW_GAP;
             }
         } finally {
             scissors.pop();

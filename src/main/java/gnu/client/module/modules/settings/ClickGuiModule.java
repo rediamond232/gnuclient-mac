@@ -25,7 +25,7 @@ public final class ClickGuiModule extends Module {
 
     private final ModeSetting font = addSetting(new ModeSetting("Font", 0,
             Arrays.asList("Modern", "Minecraft")));
-    private final BoolSetting blur = addSetting(new BoolSetting("Blur", false));
+    private final BoolSetting blur = addSetting(new BoolSetting("Blur", true));
     private final SliderSetting animationSpeed = addSetting(
             new SliderSetting("Animation speed", 1.0f, 0.5f, 2.0f, 0.05f));
     private final SliderSetting panelOpacity = addSetting(

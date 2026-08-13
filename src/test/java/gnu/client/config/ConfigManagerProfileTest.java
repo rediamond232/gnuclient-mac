@@ -299,7 +299,7 @@ public class ConfigManagerProfileTest {
         @Override
         public void write(Path path, JsonObject root) throws IOException {
             lastPath = path;
-            lastRoot = root.deepCopy();
+            lastRoot = new Gson().fromJson(root, JsonObject.class);
         }
     }
 

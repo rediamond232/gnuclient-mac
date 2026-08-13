@@ -18,6 +18,7 @@ import gnu.client.module.modules.settings.ConfigManagerModule;
 import gnu.client.common.GnuLog;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.script.ScriptManager;
+import gnu.client.util.EspOutline;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.client.event.MouseEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
@@ -110,6 +111,12 @@ public final class ClientEventListener {
 
     @SubscribeEvent
     public void onRenderName(RenderLivingEvent.Specials.Pre<?> event) {
+        // ESP silhouette stamp re-doRenders into a mask FBO — cancel Specials so
+        // nametag plates are not captured into the glow rim.
+        if (EspOutline.isBusy()) {
+            event.setCanceled(true);
+            return;
+        }
         Module nametags = ModuleManager.INSTANCE.getModule("NameTags");
         if (nametags == null || !nametags.isEnabled())
             return;

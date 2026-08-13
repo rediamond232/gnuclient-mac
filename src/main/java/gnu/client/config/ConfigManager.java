@@ -203,12 +203,13 @@ public final class ConfigManager {
 
         loading = true;
         try (Reader reader = Files.newBufferedReader(path)) {
-            JsonObject root = GSON.fromJson(reader, JsonObject.class);
-            if (root == null || !root.isJsonObject()) {
+            com.google.gson.JsonElement el = GSON.fromJson(reader, com.google.gson.JsonElement.class);
+            if (el == null || !el.isJsonObject()) {
                 lastProfileLoadError = "invalid JSON in " + sanitizedName;
                 GnuLog.log("config profile: no JSON root at " + path);
                 return ProfileLoadResult.INVALID_JSON;
             }
+            JsonObject root = el.getAsJsonObject();
 
             JsonObject previousRoot = buildRoot();
             String previousActiveConfigName = activeConfigName;

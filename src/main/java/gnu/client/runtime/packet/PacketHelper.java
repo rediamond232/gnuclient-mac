@@ -569,9 +569,32 @@ public final class PacketHelper {
                 || classNameContains(packet, "C0FPacketConfirmTransaction");
     }
 
+    /**
+     * Modern Via / 1.17+ inventory-latency replies Grim waits on (pong / ping ack).
+     * Class names vary by Via bundling; match by simple name fragments.
+     */
+    public static boolean isClientPingPong(Object packet) {
+        if (packet == null)
+            return false;
+        return classNameContains(packet, "CommonPong")
+                || classNameContains(packet, "PingPong")
+                || classNameContains(packet, "ServerboundPong")
+                || classNameContains(packet, "C2SPong");
+    }
+
     public static boolean isServerConfirmTransaction(Object packet) {
         return packet instanceof S32PacketConfirmTransaction
                 || classNameContains(packet, "S32PacketConfirmTransaction");
+    }
+
+    /** S2F set-slot or S30 window-items — inventory resync after offhand swap. */
+    public static boolean isInventorySlotUpdate(Object packet) {
+        if (packet == null)
+            return false;
+        return classNameContains(packet, "S2FPacketSetSlot")
+                || classNameContains(packet, "S30PacketWindowItems")
+                || classNameContains(packet, "SetSlot")
+                || classNameContains(packet, "WindowItems");
     }
 
     public static boolean isEntityAction(Object packet) {
@@ -588,6 +611,10 @@ public final class PacketHelper {
 
     public static boolean isStartSprintEntityAction(Object packet) {
         return entityAction(packet) == C0BPacketEntityAction.Action.START_SPRINTING;
+    }
+
+    public static boolean isStopSprintEntityAction(Object packet) {
+        return entityAction(packet) == C0BPacketEntityAction.Action.STOP_SPRINTING;
     }
 
     /** C0B START_SNEAKING / STOP_SNEAKING (Grim BadPacketsX sneak window). */

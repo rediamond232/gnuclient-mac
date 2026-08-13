@@ -29,4 +29,10 @@ public interface IAccessorEntityPlayerSP {
 
     @Accessor("serverSneakState")
     void setServerSneakState(boolean sneaking);
+
+    @Accessor("sprintToggleTimer")
+    int getSprintToggleTimer();
+
+    @Accessor("sprintToggleTimer")
+    void setSprintToggleTimer(int ticks);
 }
