@@ -3,18 +3,32 @@
 build/
 out/
 **/build/
+local.properties
+.kotlin/
 
 # IDE
 .idea/
 *.iml
+*.ipr
+*.iws
 .vscode/
+.classpath
+.project
+.settings/
+.factorypath
 *.swp
 *~
 
 # Run / Loom
 run/
 runs/
+logs/
 *.log
+crash-reports/
+*.hprof
+hs_err_pid*
+replay_pid*
+.attach_pid*
 
 # Artifacts
 *.jar
@@ -23,8 +37,22 @@ runs/
 
 # OS
 .DS_Store
+**/.DS_Store
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+desktop.ini
 
 # Local-only build output / reference dumps (not source)
 bin/
+libs/
+.tmp-src/
+harness/
 Augustus b2.6/
+
+# Agent / editor tooling scratch state
+.cursor/
+.superpowers/
+.qwen/
+.claude/
