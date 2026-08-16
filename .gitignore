@@ -52,6 +52,11 @@ harness/
 Augustus b2.6/
 OpenMyau-Plus/
 
+# Local scratch / config
+.cursorsi/
+config/
+scripts/
+
 # Agent / editor tooling scratch state
 .cursor/
 .superpowers/
