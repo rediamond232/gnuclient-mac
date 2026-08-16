@@ -3,6 +3,7 @@ package gnu.client.module.modules.combat.velocity;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketHelper;
+import gnu.client.utility.CombatTargeting;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.network.Packet;
@@ -19,6 +20,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Hypixel KB: delay self {@code S12} (+ {@code S00}/{@code S32}) for 5 ticks, then flush.
  * After flush, while hurt and near a solid, dampen horizontal (collision absorb — not jump/sprint).
  * Setback {@code S08}→{@code S12} is never delayed (grace after S08).
+ * Only delays while in combat (an enemy player within {@link #COMBAT_RANGE} blocks) — non-combat
+ * velocity (fall/explosion/arrow) passes through undelayed.
  */
 public final class HypixelVelocity extends VelocityMode {
 
@@ -27,6 +30,8 @@ public final class HypixelVelocity extends VelocityMode {
     static final int SETBACK_GRACE_TICKS = 3;
     /** Horizontal scale while hurt and colliding with a nearby solid. */
     static final double WALL_ABSORB = 0.35D;
+    /** Enemy within this range counts as "in combat" (mirrors KnockbackDelay's distance default). */
+    static final double COMBAT_RANGE = 6.0D;
 
     private final Queue<Packet<INetHandlerPlayClient>> packets = new ConcurrentLinkedQueue<>();
 
@@ -41,11 +46,11 @@ public final class HypixelVelocity extends VelocityMode {
     }
 
     /**
-     * Delay every self {@code S12} except during setback grace.
-     * Do not require {@code hurtTime} — velocity often arrives before hurt is applied.
+     * Delay a self {@code S12} only during actual player combat (enemy in range) and outside the
+     * post-{@code S08} setback grace. Non-combat velocity is passed through.
      */
-    static boolean shouldDelaySelfVelocity(boolean setbackGrace) {
-        return !setbackGrace;
+    static boolean shouldDelaySelfVelocity(boolean setbackGrace, boolean inCombat) {
+        return !setbackGrace && inCombat;
     }
 
     static boolean shouldQueue(boolean delayActive, boolean delayableSelfVelocity, boolean keepaliveOrTransaction) {
@@ -75,7 +80,7 @@ public final class HypixelVelocity extends VelocityMode {
             S12PacketEntityVelocity vel = (S12PacketEntityVelocity) packet;
             if (vel.getEntityID() != player.getEntityId())
                 return false;
-            delayableSelfVelocity = shouldDelaySelfVelocity(setbackGraceTicks > 0);
+            delayableSelfVelocity = shouldDelaySelfVelocity(setbackGraceTicks > 0, inCombat());
             if (!delayableSelfVelocity)
                 return false;
         }
@@ -137,6 +142,12 @@ public final class HypixelVelocity extends VelocityMode {
         timeout = 0;
         // Match remaining hurt window roughly — wall absorb only while still hurt.
         absorbTicks = 10;
+    }
+
+    private boolean inCombat() {
+        if (mc.theWorld == null)
+            return false;
+        return CombatTargeting.findTarget(COMBAT_RANGE * COMBAT_RANGE) != null;
     }
 
     private boolean isNearSolid(EntityPlayerSP player) {

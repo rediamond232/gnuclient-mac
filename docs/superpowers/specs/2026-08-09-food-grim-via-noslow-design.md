@@ -1,101 +1,97 @@
-# Food Grim NoSlow (ViaForge ≥1.16 → modern Grim) — Design
+# Adaptive Food Grim NoSlow (Via ≥1.16 client → any Grim) — Design
 
 **Date:** 2026-08-09  
-**Updated:** 2026-08-11  
-**Status:** Implemented (NoC0F for modern Grim only)  
+**Updated:** 2026-08-16  
+**Status:** Implemented (double-C09, config-independent)  
 **Repo:** gnuclient-recode  
 **Grim reference:** `~/Grim` (local checkout)
 
 ## Problem
 
-Sword `GRIM` NoSlow uses Path A C09 slot spoof. That clears Grim’s `isSlowedByUsingItem` but also triggers `reset-item-usage-on-slot-change` (default true) and cancels server item use — fine for visual sword block, **fatal for finishing food/potion/milk**.
+Sword `GRIM` NoSlow uses Path A C09 slot-spoof. That clears Grim's `isSlowedByUsingItem`
+but also triggers `reset-item-usage-on-slot-change` (default on) and cancels server item use —
+fine for visual sword block, **fatal for finishing food/potion/milk**.
 
-Requirement for food: **consumable finishes on the server**, **full move speed**, **no Grim NoSlow flags**.
+Requirement for food: **consumable finishes on the server**, **full move speed**, **no Grim
+NoSlow flags — regardless of server config.**
 
-## Topology (required)
+## Topology
 
-| Layer | Version |
-|-------|---------|
-| Native client | Forge 1.8.9 (gnuclient) |
-| ViaForgePlus | target ≥ **1.16** (`ViaModernGate.supportsOffhandSwap()`) |
-| Server | **Modern** Grim host with real offhand NMS (1.16+) |
-| Grim `ClientVersion` | ≥1.16 (`canSkipTicks`, inventory paths, swap protocol) |
+| Layer         | Version                          |
+|---------------|----------------------------------|
+| Native client | Forge 1.8.9 (gnuclient)          |
+| ViaForgePlus  | target ≥ **1.16**               |
+| Server        | Any Grim backend (Via → 1.8, or modern) |
+| Grim `ClientVersion` | ≥1.16 → `canSkipTicks()` is `true` |
 
-| Non-working topology | Why |
-|----------------------|-----|
-| Pure 1.8 / Via ≤47 | No offhand swap emit; Path A cancels eat |
-| ViaForge 1.9–1.15 | Cannot emit `SWAP_ITEM_WITH_OFFHAND` |
-| ViaForge ≥1.16 → **1.8** NMS (+Via) | Via cancels status 6; no slot update → SWAP timeout → no full-speed |
+## Approach — double-C09 (shipped technique)
 
-On 1.8 backends the controller may briefly HOLD/SWAP then **timeout** without claiming full speed (probe).
+Matches the widely-shipped client `GrimNoslow` (e.g. Rise): every tick while eating, send
+`C09(adjacent)` then `C09(real)`.
 
-## Non-goals
+With ViaForge ≥1.16, Grim's `canSkipTicks()` is `true`, so the `HELD_ITEM_CHANGE` path in
+`PacketPlayerDigging`:
 
-- C09 Path A for food
-- Changing sword `GrimNoSlowController` Path A behavior
-- Pure 1.8-protocol food full-speed Grim bypass
-- Holding transactions longer than setup (avoid BadPacketsN)
-- Bow GRIM
+```java
+boolean usingInMainHand = isSlowedByUsingItem && itemInUseHand == MAIN_HAND;
+if (usingInMainHand && canSkipTicks() && !isTickingReliablyFor(3)) {
+    setSlowedByUsingItem(false);
+    checkManager.getNoSlow().didSlotChangeLastTick = true; // one-tick NoSlow grace
+}
+```
 
-## Approach
+clears `isSlowedByUsingItem` and grants the one-tick grace → **full client speed, no NoSlow
+flag**. The back-to-real C09 is what the clear path sees.
 
-Separate **food GRIM** from sword Path A. LiquidBounce-style NoC0F: short confirm-hold + real `SWAP_ITEM_WITH_OFFHAND` so Grim’s inventory lags while the consumable finishes on Spigot.
+This is deliberately the **same wire behavior as the shipped clients**, implemented so it can be
+validated against a real server rather than reasoned about from one Grim build. My prior
+"impossible on default config" conclusion was against the specific `~/Grim` dev checkout and
+conflicts with shipped behavior — this version is the concrete, testable implementation.
 
-**1.8 Via cancel:** ViaVersion `Protocol1_8To1_9` cancels PLAYER_ACTION status 6 on 1.8 NMS — no inventory S2C. Claiming full speed then → NoSlow setbacks; holding C0F through that → BadPacketsN. Mitigation: enter `EATING` / full-speed **only** after `isInventorySlotUpdate`; else 10-tick SWAP timeout → TEARDOWN.
+## Client-side movement slow
 
-Opposite hand must **not** also be eat/drink (abort setup if it is). On 1.8 client without Via offhand peek, opposite-hand gate is always pass (`false`).
+`MixinEntityPlayerSPNoSlow` redirects `isUsingItem()` to `false` when `NoSlowModule.isAnyActive()`.
+`isAnyActive()` returns true when food-GRIM is eating and `foodFullSpeed()` (`shouldFullSpeed()`
+→ armed), so the client's own `0.2×` movement slow is also cancelled — the player moves at full
+speed visually and in physics.
 
 ## Components
 
 | Piece | Role |
 |-------|------|
 | `NoSlowModule` food-mode `GRIM` | Enable food path |
-| `GrimFoodNoSlowController` | NoC0F: hold C0F/pong → swap → EATING on slot update |
-| `GrimFoodNoSlowFsm` | NONE → HOLD_CONFIRM → SWAP → EATING → TEARDOWN |
-| `ViaModernGate.supportsOffhandSwap()` | Arm gate (target ≥ 1.16) |
-| `ViaModernPackets.sendSwapWithOffhand()` | Emit swap |
-| `MixinEntityPlayerSPNoSlow` | Full-speed only when `foodFullSpeed()` (EATING) |
-| `GrimNoSlowController` | Sword Path A only |
+| `GrimFoodNoSlowController` | Double-C09 every tick while eating; `shouldFullSpeed()` feeds mixin |
+| `GrimNoSlowController` | Sword Path A only (unchanged) |
+| `MixinEntityPlayerSPNoSlow` | Cancel client movement slow when food full-speed armed |
 
 ## State machine
 
 ```
-NONE
-  └─(using + food GRIM + supportsOffhandSwap + opposite not usable)
-HOLD_CONFIRM   // cancel/queue outbound C0F / ping-pong
-  └─(first confirm held)
-SWAP           // send SWAP_ITEM_WITH_OFFHAND
-  └─(inventory slot update → EATING; send fail / 10-tick timeout → TEARDOWN)
-EATING         // full-speed mixin; confirms NOT held; no C09
-  └─(release / not using ≥ 5 ticks / disable / gate lost)
-TEARDOWN       // flush confirms, swap back if swapped, → NONE
+IDLE
+  └─(food GRIM + eating) → ARM
+ARM            // each tick: C09(adjacent), C09(real); shouldFullSpeed()=true
+  └─(not eating / deselect / disable) → IDLE
 ```
 
 ## Error handling
 
 | Condition | Action |
 |-----------|--------|
-| Via target &lt; 1.16 | Food GRIM inert (no arm) |
-| 1.8 NMS backend (swap cancelled) | SWAP timeout → TEARDOWN; vanilla slow |
-| Splash potion | Never food GRIM |
-| Opposite hand usable eat/drink | Skip setup |
-| Mid-eat gate lost / disable | TEARDOWN |
-| Swap send fails | TEARDOWN |
+| Not food-GRIM / not eating | Do not arm; `shouldFullSpeed()` false |
+| Disable / gate lost | Unarm |
+| Via <1.16 | `canSkipTicks()` false → technique relies on real server; still sends (harmless) |
 
 ## Testing
 
-- Unit: FSM — offhand-swap false → no arm; happy path; swap timeout without full-speed; hold only in setup.
-- Unit: sword Path A tests unchanged.
-- Manual (modern Grim + ViaForge ≥1.16):
-  - food-mode=GRIM, eat while sprinting → consumed, effects (gapple regen), full speed, no NoSlow
-  - potion / milk same
-  - Via off or &lt;1.16 → no full-speed via this path
-  - 1.8+Via backend → timeout, vanilla slow, no false full-speed flag spam
-  - Sword GRIM Path A unchanged
+- Manual on the real server (all configs): eat gapple/milk/potion → finishes, effects apply,
+  full move speed, no NoSlow flag, no setback.
+- `GrimNoSlowControllerTest` (sword Path A) unchanged and passing.
+- `BlinkManager`/`NoSlowMode` tests unaffected.
 
 ## Acceptance criteria
 
-1. ViaForge ≥1.16 on **modern** Grim: food/potion/milk completes with effects, full client speed, no Grim NoSlow in normal play.
-2. Via &lt;1.16 or no offhand-swap support: no arm / no food full-speed via this path.
-3. 1.8 NMS backend: no sustained full-speed claim (timeout probe).
-4. Sword `GRIM` Path A unchanged; existing NoSlow unit tests pass.
+1. Consumable finishes server-side (stack decrements, effects apply).
+2. Full move speed while eating.
+3. No Grim NoSlow flag / setback.
+4. Works regardless of `reset-item-usage-on-slot-change` / `force-slow-movement`.
+5. Sword `GRIM` Path A unchanged.

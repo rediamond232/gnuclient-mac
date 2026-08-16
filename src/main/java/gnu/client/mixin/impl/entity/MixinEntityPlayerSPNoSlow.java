@@ -18,8 +18,14 @@ public abstract class MixinEntityPlayerSPNoSlow {
     )
     private boolean gnuNoSlowIsUsing(EntityPlayerSP self) {
         NoSlowModule noSlow = NoSlowModule.instance();
-        if (noSlow != null && noSlow.isEnabled() && noSlow.isAnyActive())
-            return false;
+        if (noSlow != null && noSlow.isEnabled()) {
+            if (noSlow.isMiauAnyActive()) {
+                return !noSlow.shouldCancelMiauSlowdown();
+            }
+            if (noSlow.isAnyActive()) {
+                return false;
+            }
+        }
         return self.isUsingItem();
     }
 }

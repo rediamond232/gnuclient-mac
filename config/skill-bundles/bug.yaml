@@ -1,0 +1,6 @@
+name: bug
+skills:
+  - harness-workflow
+prompt: |
+  Bug task: reproduce and isolate root cause before fixing.
+  Add or update tests that fail without the fix.

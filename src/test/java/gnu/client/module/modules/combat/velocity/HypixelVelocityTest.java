@@ -9,9 +9,11 @@ import static org.junit.Assert.assertTrue;
 public class HypixelVelocityTest {
 
     @Test
-    public void delaysUnlessSetbackGrace() {
-        assertTrue(HypixelVelocity.shouldDelaySelfVelocity(false));
-        assertFalse(HypixelVelocity.shouldDelaySelfVelocity(true));
+    public void delaysOnlyInCombatAndNotInSetbackGrace() {
+        assertTrue(HypixelVelocity.shouldDelaySelfVelocity(false, true));
+        assertFalse(HypixelVelocity.shouldDelaySelfVelocity(true, true));
+        assertFalse(HypixelVelocity.shouldDelaySelfVelocity(false, false));
+        assertFalse(HypixelVelocity.shouldDelaySelfVelocity(true, false));
     }
 
     @Test
@@ -36,5 +38,6 @@ public class HypixelVelocityTest {
         assertEquals(5, HypixelVelocity.DELAY_TICKS);
         assertEquals(3, HypixelVelocity.SETBACK_GRACE_TICKS);
         assertEquals(0.35D, HypixelVelocity.WALL_ABSORB, 0.0);
+        assertEquals(6.0D, HypixelVelocity.COMBAT_RANGE, 0.0);
     }
 }

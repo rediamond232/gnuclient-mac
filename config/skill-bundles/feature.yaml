@@ -1,0 +1,6 @@
+name: feature
+skills:
+  - harness-workflow
+prompt: |
+  Feature task: research first, produce a minimal spec, implement narrowly, review and test.
+  Prefer surgical diffs. Match existing project conventions.

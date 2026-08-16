@@ -74,6 +74,7 @@
     "accessors.IAccessorAbstractResourcePack",
     "accessors.IAccessorSimpleReloadableResourceManager",
     "accessors.IAccessorFallbackResourceManager",
-    "accessors.IAccessorEntityRenderer"
+    "accessors.IAccessorEntityRenderer",
+    "accessors.IAccessorKeyBinding"
   ]
 }

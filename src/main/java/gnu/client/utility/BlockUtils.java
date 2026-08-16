@@ -48,6 +48,10 @@ public class BlockUtils implements IMinecraftInstance {
         return block.getMaterial() == Material.lava || block.getMaterial() == Material.water;
     }
 
+    public static boolean isInteractable(BlockPos blockPos) {
+        return isInteractable(getBlock(blockPos));
+    }
+
     public static boolean isInteractable(Block block) {
         return block instanceof BlockTrapDoor || block instanceof BlockDoor || block instanceof BlockContainer || block instanceof BlockJukebox || block instanceof BlockFenceGate || block instanceof BlockChest || block instanceof BlockEnderChest || block instanceof BlockEnchantmentTable || block instanceof BlockBrewingStand || block instanceof BlockBed || block instanceof BlockDropper || block instanceof BlockDispenser || block instanceof BlockHopper || block instanceof BlockAnvil || block instanceof BlockNote || block instanceof BlockWorkbench;
     }

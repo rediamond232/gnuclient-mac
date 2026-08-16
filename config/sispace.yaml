@@ -1,0 +1,76 @@
+# SISpace application defaults (Phase 0+)
+
+version: 1
+
+ui:
+  kanban_mode: global
+
+sidecar:
+  host: "127.0.0.1"
+  port: 3847
+
+pipeline:
+  max_concurrent_pipelines: 5
+
+models:
+  default: deepseek/deepseek-v4-flash
+  reasoning: deepseek/deepseek-v4-pro
+  cheap: deepseek/deepseek-v4-flash
+  free: nex-agi/nex-n2-pro:free
+
+runtime:
+  default: local
+  cloud_repo_detect: git_remote
+
+mcp:
+  inherit_global: true
+
+terminal:
+  detect_env: TERMINAL
+  fallback: kitty
+  args: ["--directory", "{cwd}"]
+
+obsidian:
+  api_url: "http://127.0.0.1:27123"
+
+reflection:
+  transcript_source: task_messages
+  duplicate_guard: task_lock
+
+packaging:
+  target: aur
+
+# ntfy push (Phase 7 — agent complete + swarm gate unlock)
+ntfy:
+  server: "https://ntfy.sh"
+  topic: "sispace-alerts"
+
+# CLI cost UI (estimated Pro+ monthly output-token allowance)
+cost:
+  pro_plus_monthly_output_tokens: 45000000
+
+# CursorSI context compaction (Pi-style; https://pi.dev/docs/latest/compaction)
+# compact_ratio means "compact when used tokens reach this fraction of the model's
+# native context window". For example, 0.80 with DeepSeek V4 Flash (1M window)
+# triggers compaction at ~800k tokens. Unknown models fall back to context_window.
+compaction:
+  enabled: true
+  reserve_tokens: 16384
+  keep_recent_tokens: 20000
+  context_window: 200000
+  compact_ratio: 0.80
+
+# Headroom context compression — requires running proxy on HEADROOM_PROXY_URL (default http://localhost:8787)
+# Set HEADROOM_ENABLED=false to disable. Configurable via env vars:
+#   HEADROOM_PROXY_URL, HEADROOM_TIMEOUT_MS, HEADROOM_MODEL, HEADROOM_KEEP_RATIO, HEADROOM_MIN_CHARS
+headroom:
+  enabled: true
+  proxy_url: "http://localhost:8787"
+  timeout_ms: 8000
+  model: "gpt-4o"
+  target_keep_ratio: 0.55
+  min_chars_to_compress: 800
+
+v2:
+  default_workspace: sispace
+  ntfy_topic: sispace-alerts

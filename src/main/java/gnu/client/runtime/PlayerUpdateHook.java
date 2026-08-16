@@ -5,7 +5,6 @@ import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.KeepSprintModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.player.NoSlowModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -82,9 +81,6 @@ public final class PlayerUpdateHook {
     public static void beforeWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;
-        NoSlowModule.onGrimPreMovement();
-        // Do NOT KeepSprint.applyStop here — living already ran. Clearing sprint after
-        // sprint motion produces ground Simulation ~0.030 (walk packet vs sprint move).
         KillAuraModule.onBeforeWalkingPrepare(player);
         KillAuraModule.onBeforeWalkingAttack(player);
         if (overrideActive)

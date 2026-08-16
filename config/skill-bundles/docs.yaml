@@ -1,0 +1,6 @@
+name: docs
+skills:
+  - harness-workflow
+prompt: |
+  Docs task: change documentation only unless a code comment is required for accuracy.
+  Keep prose concise and verify commands against the repo.

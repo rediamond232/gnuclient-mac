@@ -50,6 +50,7 @@ libs/
 .tmp-src/
 harness/
 Augustus b2.6/
+OpenMyau-Plus/
 
 # Agent / editor tooling scratch state
 .cursor/

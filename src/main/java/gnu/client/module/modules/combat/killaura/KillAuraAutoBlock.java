@@ -440,12 +440,9 @@ public final class KillAuraAutoBlock {
                                 break;
                             case 1:
                                 if (!digging && !placing && !isPlayerBlocking()) {
-                                    NoSlowModule noSlow = NoSlowModule.instance();
-                                    if (noSlow == null || !noSlow.isEnabled() || !noSlow.isSwordGrimActive()) {
-                                        EntityPlayerSP player = Mc.player();
-                                        if (player != null)
-                                            Mc.sendHeldItemChange(grimSwapSlot(player.inventory.currentItem));
-                                    }
+                                    EntityPlayerSP player = Mc.player();
+                                    if (player != null)
+                                        Mc.sendHeldItemChange(grimSwapSlot(player.inventory.currentItem));
                                     swap = true;
                                 }
                                 attack = false;
@@ -641,6 +638,11 @@ public final class KillAuraAutoBlock {
         return player != null
                 && (player.isUsingItem() || blockingState)
                 && Mc.isHoldingSword();
+    }
+
+    /** OpenMyau {@code killAura.blockTick} read by NoSlow. */
+    public int getBlockTick() {
+        return blockTick;
     }
 
     public boolean isBlockingSession() {

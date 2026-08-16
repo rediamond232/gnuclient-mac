@@ -127,6 +127,8 @@ public final class KillAuraModule extends Module implements PacketListener {
     private final SliderSetting autoBlockCps = addSetting(new SliderSetting("AutoBlockCPS", 8.0f, 1.0f, 10.0f));
     private final SliderSetting autoBlockRange = addSetting(new SliderSetting("AutoBlockRange", 6.0f, 3.0f, 8.0f));
     private final BoolSetting autoBlockRequirePress = addSetting(new BoolSetting("AutoBlockRequirePress", false));
+    /** OpenMyau {@code KillAura.attackTick} (shown when autoBlock == SWAP); read by NoSlow. */
+    private final SliderSetting swapAttackTick = addSetting(new SliderSetting("SwapAttackTick", 0.0f, 0.0f, 5.0f, 1.0f));
     private final SliderSetting grimReleaseDelay = addSetting(new SliderSetting("GrimReleaseDelay", 2.0f, 1.0f, 10.0f, 1.0f));
     private final BoolSetting disableKeepSprintOnKb = addSetting(new BoolSetting("DisableKeepSprintOnKB", true));
     private final KillAuraAutoBlock autoBlockHelper = new KillAuraAutoBlock();
@@ -154,6 +156,7 @@ public final class KillAuraModule extends Module implements PacketListener {
         autoBlockRange.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         autoBlockRequirePress.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         grimReleaseDelay.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.GRIM);
+        swapAttackTick.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.SWAP);
         disableKeepSprintOnKb.visibleWhen(() -> {
             int m = autoBlock.getValue();
             return m == KillAuraAutoBlock.WATCHDOG2 || m == KillAuraAutoBlock.HYPIXEL3;
@@ -221,6 +224,38 @@ public final class KillAuraModule extends Module implements PacketListener {
         if (!(module instanceof KillAuraModule) || !module.isEnabled())
             return null;
         return ((KillAuraModule) module).attackTarget;
+    }
+
+    // ── OpenMyau NoSlow coupling ──────────────────────────────────────────
+
+    /** OpenMyau {@code killAura.autoBlock.getValue()}. */
+    public int getAutoBlockMode() {
+        return autoBlock.getValue();
+    }
+
+    /** OpenMyau {@code killAura.attackTick.getValue()} (SWAP only; else 0). */
+    public int getAttackTick() {
+        return Math.round(swapAttackTick.getValue());
+    }
+
+    /** OpenMyau {@code killAura.blockTick}. */
+    public int getBlockTick() {
+        return autoBlockHelper.getBlockTick();
+    }
+
+    /** OpenMyau {@code killAura.isPlayerBlocking()}. */
+    public boolean isPlayerBlocking() {
+        return autoBlockHelper.isPlayerBlocking();
+    }
+
+    /** OpenMyau {@code killAura.isBlocking()} (fakeBlockState && holdingSword). */
+    public boolean isBlocking() {
+        return autoBlockHelper.isFakeBlocking();
+    }
+
+    /** OpenMyau {@code killAura.getTarget()}. */
+    public Entity getTarget() {
+        return attackTarget;
     }
 
     /**
