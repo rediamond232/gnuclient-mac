@@ -1,14 +1,34 @@
-use egui::{Color32, Context, Rgba, Stroke, TextStyle, Visuals};
+use std::sync::Arc;
 
-/// Luxurious palette tuned for a dark, premium launcher feel.
+use egui::{
+    Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Rgba,
+    Shape, Stroke, TextStyle, Vec2, Visuals,
+};
+
+// --------------------------------------------------------------------------
+// Palette
+// --------------------------------------------------------------------------
+
+/// "OBSIDIAN TERMINAL" palette: a cold-war aerospace console.
+///
+/// Deep obsidian blue-black canvas. One "heat" accent (ember) used for brand,
+/// active nav and the primary action, and one "system" accent (ice cyan) for
+/// links, loading and selection. Everything else stays quiet so the accent
+/// moments land.
+#[derive(Clone, Copy)]
 pub struct LuxPalette {
     pub bg: Color32,
     pub bg_deep: Color32,
     pub panel: Color32,
     pub card: Color32,
     pub card_hover: Color32,
+    /// Crisp 1px hairline used on all surfaces.
+    pub edge: Color32,
+    /// Primary "heat" accent (ember).
     pub accent: Color32,
+    /// Muted ember for fills / borders (low-contrast accent).
     pub accent_soft: Color32,
+    /// Secondary "system" accent (ice cyan).
     pub accent2: Color32,
     pub text: Color32,
     pub text_dim: Color32,
@@ -18,51 +38,56 @@ pub struct LuxPalette {
 }
 
 pub const ONYX: LuxPalette = LuxPalette {
-    bg: Color32::from_rgb(12, 12, 18),
-    bg_deep: Color32::from_rgb(6, 6, 10),
-    panel: Color32::from_rgb(18, 18, 28),
-    card: Color32::from_rgb(24, 24, 36),
-    card_hover: Color32::from_rgb(30, 30, 46),
-    accent: Color32::from_rgb(120, 180, 255),
-    accent_soft: Color32::from_rgb(60, 90, 160),
-    accent2: Color32::from_rgb(180, 120, 255),
-    text: Color32::from_rgb(235, 238, 245),
-    text_dim: Color32::from_rgb(150, 155, 170),
-    danger: Color32::from_rgb(235, 90, 90),
-    success: Color32::from_rgb(90, 210, 130),
-    warn: Color32::from_rgb(235, 190, 90),
+    bg: Color32::from_rgb(10, 13, 19),
+    bg_deep: Color32::from_rgb(7, 9, 14),
+    panel: Color32::from_rgb(16, 20, 29),
+    card: Color32::from_rgb(20, 26, 38),
+    card_hover: Color32::from_rgb(27, 34, 49),
+    edge: Color32::from_rgb(31, 40, 58),
+    accent: Color32::from_rgb(255, 180, 84), // ember
+    accent_soft: Color32::from_rgb(112, 84, 50), // muted ember
+    accent2: Color32::from_rgb(79, 208, 255), // ice cyan
+    text: Color32::from_rgb(233, 238, 247),
+    text_dim: Color32::from_rgb(122, 133, 152),
+    danger: Color32::from_rgb(255, 92, 92),
+    success: Color32::from_rgb(61, 220, 132),
+    warn: Color32::from_rgb(255, 202, 102),
 };
 
+/// Cool-shifted variant: ice cyan becomes the primary accent.
 pub const AURORA: LuxPalette = LuxPalette {
-    bg: Color32::from_rgb(10, 16, 24),
-    bg_deep: Color32::from_rgb(5, 9, 14),
-    panel: Color32::from_rgb(16, 24, 34),
-    card: Color32::from_rgb(21, 30, 42),
-    card_hover: Color32::from_rgb(26, 37, 51),
-    accent: Color32::from_rgb(70, 220, 200),
-    accent_soft: Color32::from_rgb(30, 110, 120),
-    accent2: Color32::from_rgb(120, 160, 255),
-    text: Color32::from_rgb(238, 242, 245),
-    text_dim: Color32::from_rgb(150, 165, 175),
-    danger: Color32::from_rgb(235, 90, 90),
-    success: Color32::from_rgb(90, 210, 130),
-    warn: Color32::from_rgb(235, 190, 90),
+    bg: Color32::from_rgb(8, 12, 18),
+    bg_deep: Color32::from_rgb(5, 8, 12),
+    panel: Color32::from_rgb(14, 20, 30),
+    card: Color32::from_rgb(18, 26, 38),
+    card_hover: Color32::from_rgb(24, 34, 49),
+    edge: Color32::from_rgb(28, 40, 58),
+    accent: Color32::from_rgb(79, 208, 255), // ice cyan
+    accent_soft: Color32::from_rgb(42, 104, 138), // muted cyan
+    accent2: Color32::from_rgb(255, 180, 84), // ember
+    text: Color32::from_rgb(233, 239, 247),
+    text_dim: Color32::from_rgb(118, 133, 152),
+    danger: Color32::from_rgb(255, 92, 92),
+    success: Color32::from_rgb(61, 220, 132),
+    warn: Color32::from_rgb(255, 202, 102),
 };
 
+/// Warm-shifted variant: ember stays primary, cyan is a cooler secondary.
 pub const OBSIDIAN: LuxPalette = LuxPalette {
-    bg: Color32::from_rgb(16, 12, 20),
-    bg_deep: Color32::from_rgb(9, 6, 12),
-    panel: Color32::from_rgb(24, 18, 30),
-    card: Color32::from_rgb(30, 23, 38),
-    card_hover: Color32::from_rgb(37, 29, 46),
-    accent: Color32::from_rgb(230, 120, 220),
-    accent_soft: Color32::from_rgb(120, 50, 120),
-    accent2: Color32::from_rgb(120, 180, 255),
-    text: Color32::from_rgb(240, 236, 242),
-    text_dim: Color32::from_rgb(165, 155, 172),
-    danger: Color32::from_rgb(235, 90, 90),
-    success: Color32::from_rgb(90, 210, 130),
-    warn: Color32::from_rgb(235, 190, 90),
+    bg: Color32::from_rgb(12, 11, 16),
+    bg_deep: Color32::from_rgb(8, 7, 11),
+    panel: Color32::from_rgb(19, 18, 26),
+    card: Color32::from_rgb(24, 22, 33),
+    card_hover: Color32::from_rgb(31, 28, 43),
+    edge: Color32::from_rgb(40, 36, 56),
+    accent: Color32::from_rgb(255, 176, 82), // ember
+    accent_soft: Color32::from_rgb(116, 84, 50),
+    accent2: Color32::from_rgb(79, 208, 255), // ice cyan
+    text: Color32::from_rgb(242, 237, 245),
+    text_dim: Color32::from_rgb(132, 125, 144),
+    danger: Color32::from_rgb(255, 92, 92),
+    success: Color32::from_rgb(61, 220, 132),
+    warn: Color32::from_rgb(255, 202, 102),
 };
 
 pub fn palette_for(name: &str) -> &'static LuxPalette {
@@ -73,64 +98,189 @@ pub fn palette_for(name: &str) -> &'static LuxPalette {
     }
 }
 
-/// Install the application visuals for a given palette.
+// --------------------------------------------------------------------------
+// Fonts
+// --------------------------------------------------------------------------
+
+const CHAKRA_BOLD: &[u8] = include_bytes!("../../assets/fonts/ChakraPetch-Bold.ttf");
+const CHAKRA_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/ChakraPetch-SemiBold.ttf");
+const BARLOW_REGULAR: &[u8] = include_bytes!("../../assets/fonts/Barlow-Regular.ttf");
+const BARLOW_MEDIUM: &[u8] = include_bytes!("../../assets/fonts/Barlow-Medium.ttf");
+const BARLOW_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/Barlow-SemiBold.ttf");
+const PLEXMONO_REGULAR: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf");
+const PLEXMONO_MEDIUM: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-Medium.ttf");
+const PLEXMONO_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-SemiBold.ttf");
+
+/// Install the bundled typefaces. Call once at startup.
+pub fn install_fonts(ctx: &Context) {
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "chakra_bold".into(),
+        Arc::new(FontData::from_static(CHAKRA_BOLD)),
+    );
+    fonts.font_data.insert(
+        "chakra_semibold".into(),
+        Arc::new(FontData::from_static(CHAKRA_SEMIBOLD)),
+    );
+    fonts.font_data.insert(
+        "barlow_regular".into(),
+        Arc::new(FontData::from_static(BARLOW_REGULAR)),
+    );
+    fonts.font_data.insert(
+        "barlow_medium".into(),
+        Arc::new(FontData::from_static(BARLOW_MEDIUM)),
+    );
+    fonts.font_data.insert(
+        "barlow_semibold".into(),
+        Arc::new(FontData::from_static(BARLOW_SEMIBOLD)),
+    );
+    fonts.font_data.insert(
+        "plexmono_regular".into(),
+        Arc::new(FontData::from_static(PLEXMONO_REGULAR)),
+    );
+    fonts.font_data.insert(
+        "plexmono_medium".into(),
+        Arc::new(FontData::from_static(PLEXMONO_MEDIUM)),
+    );
+    fonts.font_data.insert(
+        "plexmono_semibold".into(),
+        Arc::new(FontData::from_static(PLEXMONO_SEMIBOLD)),
+    );
+
+    let latin_fb: Vec<String> =
+        ["Ubuntu-Light", "NotoEmoji-Regular", "emoji-icon-font"].map(String::from).to_vec();
+    let mono_fb: Vec<String> =
+        ["Hack", "NotoEmoji-Regular", "emoji-icon-font"].map(String::from).to_vec();
+
+    let mut display: Vec<String> = vec!["chakra_bold".into(), "chakra_semibold".into()];
+    display.extend(latin_fb.iter().cloned());
+    let mut display_semi: Vec<String> = vec!["chakra_semibold".into(), "chakra_bold".into()];
+    display_semi.extend(latin_fb.iter().cloned());
+
+    let mut body: Vec<String> = vec![
+        "barlow_regular".into(),
+        "barlow_medium".into(),
+        "barlow_semibold".into(),
+    ];
+    body.extend(latin_fb.iter().cloned());
+    let mut body_medium: Vec<String> = vec!["barlow_medium".into(), "barlow_semibold".into()];
+    body_medium.extend(latin_fb.iter().cloned());
+    let mut body_semi: Vec<String> = vec!["barlow_semibold".into(), "barlow_medium".into()];
+    body_semi.extend(latin_fb.iter().cloned());
+
+    let mut mono: Vec<String> = vec![
+        "plexmono_regular".into(),
+        "plexmono_medium".into(),
+        "plexmono_semibold".into(),
+    ];
+    mono.extend(mono_fb.iter().cloned());
+    let mut mono_medium: Vec<String> = vec!["plexmono_medium".into(), "plexmono_semibold".into()];
+    mono_medium.extend(mono_fb.iter().cloned());
+    let mut mono_semi: Vec<String> = vec!["plexmono_semibold".into(), "plexmono_medium".into()];
+    mono_semi.extend(mono_fb.iter().cloned());
+
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Display")), display);
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Display-Semi")), display_semi);
+    fonts.families.insert(FontFamily::Proportional, body);
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Body-Medium")), body_medium);
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Body-Semi")), body_semi);
+    fonts.families.insert(FontFamily::Monospace, mono);
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Mono-Medium")), mono_medium);
+    fonts
+        .families
+        .insert(FontFamily::Name(Arc::from("Mono-Semi")), mono_semi);
+
+    ctx.set_fonts(fonts);
+}
+
+// Convenience font helpers (size, family).
+pub fn display(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Name(Arc::from("Display")))
+}
+pub fn display_sb(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Name(Arc::from("Display-Semi")))
+}
+pub fn body(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Proportional)
+}
+pub fn body_med(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Name(Arc::from("Body-Medium")))
+}
+pub fn body_sb(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Name(Arc::from("Body-Semi")))
+}
+pub fn mono(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Monospace)
+}
+pub fn mono_sb(px: f32) -> FontId {
+    FontId::new(px, FontFamily::Name(Arc::from("Mono-Semi")))
+}
+
+// --------------------------------------------------------------------------
+// Visuals
+// --------------------------------------------------------------------------
+
 pub fn install_visuals(ctx: &Context, p: &LuxPalette, scale: f32) {
-    let mut visuals = Visuals::dark();
-    visuals.panel_fill = p.panel;
-    visuals.window_fill = p.panel;
-    visuals.extreme_bg_color = p.bg_deep;
-    visuals.faint_bg_color = p.bg;
+    let mut v = Visuals::dark();
+    v.panel_fill = p.panel;
+    v.window_fill = p.panel;
+    v.extreme_bg_color = p.bg_deep;
+    v.faint_bg_color = p.bg;
 
-    visuals.widgets.inactive.bg_fill = p.card;
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, p.text);
-    visuals.widgets.inactive.weak_bg_fill = p.card;
+    v.widgets.inactive.bg_fill = p.card;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, p.edge);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, p.text);
+    v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
 
-    visuals.widgets.hovered.bg_fill = p.card_hover;
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, p.text);
+    v.widgets.hovered.bg_fill = p.card_hover;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.accent_soft);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, p.text);
 
-    visuals.widgets.active.bg_fill = p.accent_soft;
-    visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+    v.widgets.active.bg_fill = p.accent_soft;
+    v.widgets.active.bg_stroke = Stroke::new(1.5_f32, p.accent);
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
 
-    visuals.widgets.open.bg_fill = p.accent_soft;
-    visuals.widgets.open.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+    v.widgets.open.bg_fill = p.card_hover;
+    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, p.edge);
+    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, p.text);
 
-    visuals.selection.bg_fill = p.accent_soft;
-    visuals.selection.stroke = Stroke::new(1.0_f32, p.accent);
-    visuals.hyperlink_color = p.accent;
-    visuals.text_cursor.stroke = Stroke::new(1.5_f32, p.accent);
+    v.selection.bg_fill = p.accent_soft;
+    v.selection.stroke = Stroke::new(1.0_f32, p.accent);
+    v.hyperlink_color = p.accent2;
+    v.text_cursor.stroke = Stroke::new(1.5_f32, p.accent);
 
-    visuals.window_stroke = Stroke::new(1.0_f32, p.card_hover);
-    visuals.window_corner_radius = 12.0.into();
-    visuals.popup_shadow = egui::epaint::Shadow {
-        offset: [0, 8],
-        blur: 24,
+    v.window_stroke = Stroke::new(1.0_f32, p.edge);
+    v.window_corner_radius = 10.0.into();
+    v.popup_shadow = egui::epaint::Shadow {
+        offset: [0, 10],
+        blur: 30,
         spread: 0,
-        color: Color32::from_black_alpha(140),
+        color: Color32::from_black_alpha(180),
     };
-    visuals.override_text_color = Some(p.text);
+    v.override_text_color = Some(p.text);
+    ctx.set_visuals(v);
 
-    ctx.set_visuals(visuals);
+    let mut s = (*ctx.style()).clone();
+    s.spacing.item_spacing = Vec2::new(10.0, 8.0);
+    s.spacing.button_padding = Vec2::new(14.0, 8.0);
+    s.spacing.interact_size.y = 34.0;
+    s.text_styles.insert(TextStyle::Heading, display(24.0 * scale));
+    s.text_styles.insert(TextStyle::Body, body(15.0 * scale));
+    s.text_styles.insert(TextStyle::Button, body(14.0 * scale));
+    s.text_styles.insert(TextStyle::Small, body(12.0 * scale));
+    s.text_styles.insert(TextStyle::Monospace, mono(13.0 * scale));
+    ctx.set_style(s);
 
-    // Typography.
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-    style.spacing.button_padding = egui::vec2(14.0, 8.0);
-    style.spacing.interact_size.y = 34.0;
-    style.text_styles.insert(
-        TextStyle::Heading,
-        egui::FontId::new(26.0 * scale, egui::FontFamily::Proportional),
-    );
-    style.text_styles.insert(
-        TextStyle::Body,
-        egui::FontId::new(15.0 * scale, egui::FontFamily::Proportional),
-    );
-    style.text_styles.insert(
-        TextStyle::Button,
-        egui::FontId::new(15.0 * scale, egui::FontFamily::Proportional),
-    );
-    ctx.set_style(style);
-
-    // Rounded corners for widgets.
     ctx.style_mut(|s| {
         for w in [
             &mut s.visuals.widgets.noninteractive,
@@ -145,6 +295,10 @@ pub fn install_visuals(ctx: &Context, p: &LuxPalette, scale: f32) {
     });
 }
 
+// --------------------------------------------------------------------------
+// Color / animation helpers
+// --------------------------------------------------------------------------
+
 pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     Color32::from_rgba_unmultiplied(
@@ -155,11 +309,13 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
-/// Smoothly pulse between accent colors for "live" elements.
-pub fn pulse(ctx: &Context, p: &LuxPalette) -> Color32 {
-    let t = ctx.input(|i| i.time as f32 * 0.5);
-    let s = (t.sin() * 0.5 + 0.5) as f32;
-    lerp(p.accent, p.accent2, s)
+pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    lerp(a, b, t)
+}
+
+/// Animate a boolean toward 0..1 for smooth hover/state transitions.
+pub fn anim(ctx: &Context, id: egui::Id, target: bool, speed: f32) -> f32 {
+    ctx.animate_value_with_time(id.with("anim"), if target { 1.0 } else { 0.0 }, speed)
 }
 
 pub fn rgba(color: Color32, alpha: f32) -> Rgba {
@@ -172,11 +328,21 @@ pub fn rgba(color: Color32, alpha: f32) -> Rgba {
     )
 }
 
-/// Draw a rounded rectangle filled with a linear gradient between two colors.
-/// `vertical` picks a top->bottom vs left->right gradient.
+/// Smoothly pulse between accent and accent2 (used for "live" dots).
+pub fn pulse(ctx: &Context, p: &LuxPalette) -> Color32 {
+    let t = ctx.input(|i| i.time as f32 * 0.5);
+    let s = (t.sin() * 0.5 + 0.5) as f32;
+    lerp(p.accent, p.accent2, s)
+}
+
+// --------------------------------------------------------------------------
+// Custom drawing
+// --------------------------------------------------------------------------
+
+/// Draw a rounded rectangle with a top->bottom linear gradient.
 pub fn gradient_rect(
-    painter: &egui::Painter,
-    rect: egui::Rect,
+    painter: &Painter,
+    rect: Rect,
     rounding: f32,
     from: Color32,
     to: Color32,
@@ -189,23 +355,30 @@ pub fn gradient_rect(
     let cx1 = max.x - rounding;
     let cy1 = max.y - rounding;
 
-    // Sample the rounded-corner outline clockwise (4 arcs, 5 segments each).
-    let seg = 5;
-    let mut pts: Vec<egui::Pos2> = Vec::new();
+    let seg = 6;
+    let mut pts: Vec<Pos2> = Vec::new();
     let corners = [
-        (egui::pos2(cx0, cy0), std::f32::consts::PI, std::f32::consts::PI * 0.5), // top-left: left -> top
-        (egui::pos2(cx1, cy0), std::f32::consts::TAU * 0.75, std::f32::consts::PI * 0.5), // top-right: top -> right
-        (egui::pos2(cx1, cy1), 0.0, std::f32::consts::PI * 0.5), // bottom-right: right -> bottom
-        (egui::pos2(cx0, cy1), std::f32::consts::PI * 0.5, std::f32::consts::PI * 0.5), // bottom-left: bottom -> left
+        (Pos2::new(cx0, cy0), std::f32::consts::PI, std::f32::consts::PI * 0.5),
+        (
+            Pos2::new(cx1, cy0),
+            std::f32::consts::TAU * 0.75,
+            std::f32::consts::PI * 0.5,
+        ),
+        (Pos2::new(cx1, cy1), 0.0, std::f32::consts::PI * 0.5),
+        (
+            Pos2::new(cx0, cy1),
+            std::f32::consts::PI * 0.5,
+            std::f32::consts::PI * 0.5,
+        ),
     ];
     for (c, a0, da) in corners {
         for i in 0..seg {
             let a = a0 + da * (i as f32 / seg as f32);
-            pts.push(egui::pos2(c.x + a.cos() * rounding, c.y + a.sin() * rounding));
+            pts.push(Pos2::new(c.x + a.cos() * rounding, c.y + a.sin() * rounding));
         }
     }
 
-    let color = |p: egui::Pos2| -> Color32 {
+    let color = |p: Pos2| -> Color32 {
         let t = if vertical {
             ((p.y - min.y) / (max.y - min.y).max(1.0)).clamp(0.0, 1.0)
         } else {
@@ -229,21 +402,78 @@ pub fn gradient_rect(
         let j = (i + 1) % outline.len();
         mesh.add_triangle(center_idx as u32, outline[i] as u32, outline[j] as u32);
     }
-    painter.add(egui::Shape::mesh(mesh));
+    painter.add(Shape::mesh(mesh));
 }
 
-/// Soft ambient glow around a rounded rect, drawn beneath content.
-pub fn glow(painter: &egui::Painter, rect: egui::Rect, color: Color32, radius: f32) {
+/// A soft radial color wash (center opaque -> edges transparent).
+pub fn radial_fill(painter: &Painter, rect: Rect, color: Color32, max_alpha: f32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.5;
+    let alpha = (max_alpha.clamp(0.0, 1.0) * 255.0) as u8;
+    let n = 48;
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(
+        c,
+        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha),
+    );
+    for i in 0..n {
+        let a = std::f32::consts::TAU * i as f32 / n as f32;
+        let p = c + Vec2::new(a.cos(), a.sin()) * r;
+        mesh.colored_vertex(p, Color32::TRANSPARENT);
+    }
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + ((i + 1) % n));
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+/// Layered ambient glow around a rounded rect (drawn beneath content).
+pub fn glow(painter: &Painter, rect: Rect, color: Color32, radius: f32) {
     const LAYERS: usize = 5;
     for i in 0..LAYERS {
         let t = i as f32 / (LAYERS as f32 - 1.0); // 0 outermost
         let grow = radius * (1.0 - t);
-        let alpha = (26.0 * (1.0 - t)) as u8;
+        // Quadratic falloff keeps the glow hugging the edge instead of
+        // blooming far out when the color is bright.
+        let alpha = (12.0 * (1.0 - t) * (1.0 - t)) as u8;
         let r = rect.expand(grow);
         painter.rect_filled(
             r,
-            (8.0 + grow).max(0.0),
+            (4.0 + grow).max(0.0),
             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha),
         );
     }
+}
+
+/// Fill the background and layer the corner washes + a soft central bloom.
+pub fn atmosphere(painter: &Painter, rect: Rect, p: &LuxPalette) {
+    painter.rect_filled(rect, 0.0, p.bg);
+    radial_fill(
+        painter,
+        Rect::from_center_size(
+            Pos2::new(rect.left() + 140.0, rect.top() + 90.0),
+            Vec2::new(rect.width() * 0.7, rect.width() * 0.7),
+        ),
+        p.accent,
+        0.20,
+    );
+    radial_fill(
+        painter,
+        Rect::from_center_size(
+            Pos2::new(rect.right() - 160.0, rect.bottom() - 110.0),
+            Vec2::new(rect.width() * 0.7, rect.width() * 0.7),
+        ),
+        p.accent2,
+        0.18,
+    );
+    // A soft central bloom to give the glass something to pick up.
+    radial_fill(
+        painter,
+        Rect::from_center_size(
+            Pos2::new(rect.center().x, rect.center().y),
+            Vec2::new(rect.width() * 0.4, rect.width() * 0.4),
+        ),
+        p.accent2,
+        0.10,
+    );
 }

@@ -1,4 +1,4 @@
-use eframe::egui::{self, Align, Layout, RichText, Ui};
+use eframe::egui::{self, Layout, Ui};
 use egui::TextEdit;
 
 use crate::app::LauncherApp;
@@ -7,6 +7,7 @@ use crate::modrinth::client::{self, ModrinthProject};
 use crate::modrinth::types::ModrinthType;
 use crate::state::{InstallOutcome, SearchResult};
 use crate::ui::widgets;
+use crate::util::theme;
 
 pub fn show(
     app: &mut LauncherApp,
@@ -14,29 +15,38 @@ pub fn show(
     mtype: ModrinthType,
     inst: Option<&GameInstanceConfig>,
 ) {
-    let pal = crate::util::theme::palette_for(&app.config.theme);
+    let pal = theme::palette_for(&app.config.theme);
 
-    ui.add_space(12.0);
+    ui.add_space(2.0);
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(mtype.title())
-                .size(26.0)
-                .strong()
-                .color(pal.text),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new(mtype.title())
+                    .font(theme::display(24.0))
+                    .color(pal.text),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "Browse & manage {} for your instance.",
+                    mtype.title().to_lowercase()
+                ))
+                .font(theme::body(13.0))
+                .color(pal.text_dim),
+            );
+        });
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add(
                 TextEdit::singleline(&mut app.search_query)
-                    .hint_text(format!("Search {}", mtype.title()))
-                    .desired_width(300.0)
-                    .margin(egui::vec2(12.0, 10.0)),
+                    .hint_text(format!("Search {}...", mtype.title()))
+                    .desired_width(280.0)
+                    .font(theme::body(14.0)),
             );
-            if ui.button("Search").clicked() {
+            if widgets::ghost_button(ui, "Search", pal, 96.0) {
                 trigger_search(app, mtype);
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(12.0);
 
     // Auto-search on first paint for this tab.
     let needs_initial = !app
@@ -58,7 +68,7 @@ pub fn show(
         ModrinthType::ResourcePack => inst.map(|i| i.installed_packs.clone()).unwrap_or_default(),
     };
     show_installed(app, ui, &installed, pal);
-    ui.add_space(14.0);
+    ui.add_space(16.0);
 
     // Browse section.
     widgets::section_title(ui, pal, "Browse Modrinth");
@@ -76,12 +86,22 @@ pub fn show(
             };
             if loading {
                 ui.spinner();
-                ui.label(RichText::new("Searching Modrinth...").color(pal.text_dim));
+                ui.label(
+                    egui::RichText::new("Searching Modrinth...")
+                        .font(theme::body(13.0))
+                        .color(pal.text_dim),
+                );
             } else if let Some(err) = error {
-                ui.label(RichText::new(err).color(pal.danger));
+                ui.label(
+                    egui::RichText::new(err)
+                        .font(theme::body(13.0))
+                        .color(pal.danger),
+                );
             } else if results.is_empty() {
                 ui.label(
-                    RichText::new("No projects found. Try a different search.").color(pal.text_dim),
+                    egui::RichText::new("No projects found. Try a different search.")
+                        .font(theme::body(13.0))
+                        .color(pal.text_dim),
                 );
             } else {
                 for proj in &results {
@@ -135,53 +155,67 @@ fn show_installed(
     pal: &crate::util::theme::LuxPalette,
 ) {
     if items.is_empty() {
-        ui.label(RichText::new("Nothing installed yet.").color(pal.text_dim));
+        ui.label(
+            egui::RichText::new("Nothing installed yet.")
+                .font(theme::body(13.0))
+                .color(pal.text_dim),
+        );
         return;
     }
-    // Kick off icon fetches for every installed item up front.
     for item in items {
         if let Some(u) = &item.icon_url {
             app.request_icon(u);
         }
     }
-    let mut to_remove: Option<String> = None;
-    for item in items {
-        ui.horizontal(|ui| {
-            let tex = item.icon_url.as_deref().and_then(|u| app.icon_texture(u));
-            widgets::icon_tile(ui, tex, &item.name, pal, 44.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new(&item.name).strong());
-                ui.label(
-                    RichText::new(format!("v{} · {}", item.version, item.file_name))
-                        .size(12.0)
+    widgets::card(ui, pal, |ui| {
+        ui.set_width(ui.available_width());
+        let mut to_remove: Option<String> = None;
+        for item in items {
+            ui.horizontal(|ui| {
+                let tex = item.icon_url.as_deref().and_then(|u| app.icon_texture(u));
+                widgets::icon_tile(ui, tex, &item.name, pal, 44.0);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(&item.name)
+                            .font(theme::body_sb(15.0))
+                            .color(pal.text),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "v{}  ·  {}",
+                            item.version, item.file_name
+                        ))
+                        .font(theme::mono(11.0))
                         .color(pal.text_dim),
-                );
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::ghost_button(ui, "Remove", pal, 96.0) {
+                        to_remove = Some(item.id.clone());
+                    }
+                });
             });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Remove").clicked() {
-                    to_remove = Some(item.id.clone());
-                }
-            });
-        });
-        widgets::divider(ui, pal);
-    }
-    if let Some(id) = to_remove {
-        let data = app.config.data_dir.clone();
-        if let Some(inst) = app.active_instance_mut() {
-            let snapshot = inst.clone();
-            let item = snapshot
-                .installed_mods
-                .iter()
-                .chain(snapshot.installed_shaders.iter())
-                .chain(snapshot.installed_packs.iter())
-                .find(|i| i.id == id)
-                .cloned();
-            if let Some(item) = item {
-                crate::modrinth::install::remove_content(inst, &item, &data, true);
-            }
-            app.persist();
+            widgets::divider(ui, pal);
         }
-    }
+        if let Some(id) = to_remove {
+            let data = app.config.data_dir.clone();
+            if let Some(inst) = app.active_instance_mut() {
+                let snapshot = inst.clone();
+                let item = snapshot
+                    .installed_mods
+                    .iter()
+                    .chain(snapshot.installed_shaders.iter())
+                    .chain(snapshot.installed_packs.iter())
+                    .find(|i| i.id == id)
+                    .cloned();
+                if let Some(item) = item {
+                    crate::modrinth::install::remove_content(inst, &item, &data, true);
+                }
+                app.persist();
+            }
+        }
+    });
+    ui.add_space(6.0);
 }
 
 fn project_row(
@@ -203,25 +237,24 @@ fn project_row(
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(&proj.title)
-                            .size(16.0)
-                            .strong()
+                        egui::RichText::new(&proj.title)
+                            .font(theme::body_sb(16.0))
                             .color(pal.text),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(10.0);
                     ui.label(
-                        RichText::new(format!("{} downloads", proj.downloads))
-                            .size(12.0)
+                        egui::RichText::new(format!("{} downloads", proj.downloads))
+                            .font(theme::mono(11.0))
                             .color(pal.text_dim),
                     );
                 });
                 ui.label(
-                    RichText::new(&proj.description)
-                        .size(12.0)
+                    egui::RichText::new(&proj.description)
+                        .font(theme::body(12.0))
                         .color(pal.text_dim),
                 );
             });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 let installed = inst
                     .map(|i| match mtype {
                         ModrinthType::Mod => i.installed_mods.iter(),
@@ -231,12 +264,13 @@ fn project_row(
                     .map(|mut list| list.any(|m| m.project_id.as_deref() == Some(&proj.id)))
                     .unwrap_or(false);
                 let btn_label = if installed { "Installed" } else { "Install" };
+                let from = if installed { pal.success } else { pal.accent };
                 if widgets::primary_button(
                     ui,
                     btn_label,
-                    pal.accent,
-                    pal.accent2,
-                    egui::vec2(96.0, 34.0),
+                    from,
+                    from,
+                    egui::vec2(104.0, 36.0),
                 ) && !installed
                 {
                     install_project(app, proj, mtype);

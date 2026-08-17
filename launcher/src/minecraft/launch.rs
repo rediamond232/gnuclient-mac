@@ -1,8 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use crate::app::GameStatus;
 
 use crate::config::accounts::Account;
 use crate::minecraft::instance::{ContentType, GameInstanceConfig};
@@ -258,6 +261,7 @@ pub fn begin_launch(app: &mut crate::app::LauncherApp) {
     let dm = app.download_manager.clone();
     let game_log = app.game_log.clone();
     let status = app.status_handle.clone();
+    let process = app.game_process.clone();
 
     runtime.spawn(async move {
         let result = provision_and_launch(
@@ -269,10 +273,55 @@ pub fn begin_launch(app: &mut crate::app::LauncherApp) {
             forge_version,
             game_log,
             status.clone(),
+            process,
         )
         .await;
         if let Err(e) = result {
             *status.lock().unwrap() = GameStatus::Failed(e.to_string());
+        }
+    });
+}
+
+/// Polls the running game process and flips status to `Exited` once it ends,
+/// so the UI can switch the Play button back to Play automatically. The process
+/// handle is kept in the shared `Arc<Mutex>` so the Stop button can also take it.
+fn spawn_exit_monitor(
+    process: Arc<Mutex<Option<LaunchedGame>>>,
+    status: Arc<Mutex<GameStatus>>,
+) {
+    enum Outcome {
+        Running,
+        Exited(i32),
+        Gone,
+        Err(String),
+    }
+
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(300));
+        let outcome = {
+            let mut guard = process.lock().unwrap();
+            match guard.as_mut() {
+                Some(mut launched) => match launched.child.try_wait() {
+                    Ok(Some(code)) => Outcome::Exited(code.code().unwrap_or(0)),
+                    Ok(None) => Outcome::Running,
+                    Err(e) => Outcome::Err(e.to_string()),
+                },
+                None => Outcome::Gone,
+            }
+        };
+        match outcome {
+            Outcome::Running => continue,
+            Outcome::Gone => break,
+            Outcome::Exited(c) => {
+                *process.lock().unwrap() = None;
+                *status.lock().unwrap() = GameStatus::Exited(c);
+                break;
+            }
+            Outcome::Err(e) => {
+                *process.lock().unwrap() = None;
+                *status.lock().unwrap() = GameStatus::Failed(format!("process error: {e}"));
+                break;
+            }
         }
     });
 }
@@ -286,6 +335,7 @@ async fn provision_and_launch(
     forge_version: String,
     game_log: Arc<Mutex<Vec<String>>>,
     status: Arc<Mutex<crate::app::GameStatus>>,
+    process: Arc<Mutex<Option<LaunchedGame>>>,
 ) -> anyhow::Result<()> {
     use crate::app::GameStatus;
 
@@ -355,7 +405,9 @@ async fn provision_and_launch(
         libraries: libs,
         window_size: None,
     };
-    launch_game(cfg, game_log)?;
+    let launched = launch_game(cfg, game_log)?;
+    *process.lock().unwrap() = Some(launched);
     *status.lock().unwrap() = GameStatus::Running;
+    spawn_exit_monitor(process.clone(), status.clone());
     Ok(())
 }

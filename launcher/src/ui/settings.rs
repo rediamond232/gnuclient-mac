@@ -1,28 +1,37 @@
-use eframe::egui::{self, Align, Layout, RichText, Ui};
+use eframe::egui::{self, Layout, Ui};
 use egui::TextEdit;
 
 use crate::app::LauncherApp;
 use crate::minecraft::instance::GameInstanceConfig;
 use crate::ui::widgets;
+use crate::util::theme;
 
 pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig>) {
-    let pal = crate::util::theme::palette_for(&app.config.theme);
+    let pal = theme::palette_for(&app.config.theme);
 
-    ui.add_space(12.0);
+    ui.add_space(2.0);
     ui.label(
-        RichText::new("Settings")
-            .size(26.0)
-            .strong()
+        egui::RichText::new("Settings")
+            .font(theme::display(24.0))
             .color(pal.text),
     );
-    ui.add_space(12.0);
+    ui.label(
+        egui::RichText::new("Instances, JVM args and launcher preferences.")
+            .font(theme::body(13.0))
+            .color(pal.text_dim),
+    );
+    ui.add_space(16.0);
 
     // Instance selector.
     widgets::card(ui, pal, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_title(ui, pal, "Instance");
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Active instance").color(pal.text_dim));
+            ui.label(
+                egui::RichText::new("Active instance")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
             let current = app.active_instance_id.clone();
             egui::ComboBox::from_id_salt("instance_sel")
                 .selected_text(
@@ -55,8 +64,12 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         ui.add_space(6.0);
         let mut new_name = String::new();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("New").color(pal.text_dim));
-            let resp = ui.add(TextEdit::singleline(&mut new_name).desired_width(200.0));
+            ui.label(
+                egui::RichText::new("New")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
+            let resp = widgets::field(ui, &mut new_name, "Instance name…", 220.0);
             if resp.lost_focus() && !new_name.trim().is_empty() {
                 let name = new_name.trim().to_string();
                 let data = app.config.data_dir.clone();
@@ -96,11 +109,23 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
             ui.add_space(6.0);
             let valid = crate::minecraft::launch::validate_jvm_args(&jvm);
             match valid {
-                Ok(_) => ui.label(RichText::new("✓ Valid arguments").color(pal.success)),
-                Err(e) => ui.label(RichText::new(format!("✕ {e}")).color(pal.danger)),
+                Ok(_) => ui.label(
+                    egui::RichText::new("✓ Valid arguments")
+                        .font(theme::mono(12.0))
+                        .color(pal.success),
+                ),
+                Err(e) => ui.label(
+                    egui::RichText::new(format!("✕ {e}"))
+                        .font(theme::mono(12.0))
+                        .color(pal.danger),
+                ),
             };
         } else {
-            ui.label(RichText::new("No active instance.").color(pal.text_dim));
+            ui.label(
+                egui::RichText::new("No active instance.")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
         }
     });
     ui.add_space(14.0);
@@ -112,23 +137,26 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         if let Some(inst) = inst {
             if inst.has_gnuclient {
                 ui.label(
-                    RichText::new("✓ GNUClient is installed in this instance.").color(pal.success),
+                    egui::RichText::new("✓ GNUClient is installed in this instance.")
+                        .font(theme::body(13.0))
+                        .color(pal.success),
                 );
                 if let Some(jar) = &inst.gnuclient_jar {
                     ui.label(
-                        RichText::new(format!("Jar: {}", jar.display()))
-                            .size(12.0)
+                        egui::RichText::new(format!("Jar: {}", jar.display()))
+                            .font(theme::mono(11.0))
                             .color(pal.text_dim),
                     );
                 }
             } else {
                 ui.label(
-                    RichText::new("GNUClient jar not installed. Select it to bundle.")
+                    egui::RichText::new("GNUClient jar not installed. Select it to bundle.")
+                        .font(theme::body(13.0))
                         .color(pal.warn),
                 );
             }
             ui.add_space(6.0);
-            if ui.button("Select GNUClient Jar...").clicked() {
+            if widgets::ghost_button(ui, "Select GNUClient Jar...", pal, 200.0) {
                 select_gnuclient_jar(app);
             }
         }
@@ -141,11 +169,15 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         widgets::section_title(ui, pal, "General");
         // Theme.
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Theme").color(pal.text_dim));
+            ui.label(
+                egui::RichText::new("Theme")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
             let themes = ["onyx", "aurora", "obsidian"];
             for t in themes {
                 let selected = app.config.theme == t;
-                if ui.selectable_label(selected, t).clicked() {
+                if ui.selectable_label(selected, t.to_uppercase()).clicked() {
                     app.config.theme = t.to_string();
                     app.persist();
                 }
@@ -154,7 +186,11 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         ui.add_space(6.0);
         // Concurrent downloads.
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Max downloads").color(pal.text_dim));
+            ui.label(
+                egui::RichText::new("Max downloads")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
             let mut n = app.config.max_concurrent_downloads as f32;
             if ui
                 .add(egui::Slider::new(&mut n, 1.0..=32.0).integer())
@@ -167,7 +203,11 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         });
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Auto-install Java 8").color(pal.text_dim));
+            ui.label(
+                egui::RichText::new("Auto-install Java 8")
+                    .font(theme::body(13.0))
+                    .color(pal.text_dim),
+            );
             let mut b = app.config.auto_install_java;
             if ui.checkbox(&mut b, "").changed() {
                 app.config.auto_install_java = b;
@@ -177,12 +217,12 @@ pub fn show(app: &mut LauncherApp, ui: &mut Ui, inst: Option<&GameInstanceConfig
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("Data dir: {}", app.config.data_dir.display()))
-                    .size(11.0)
+                egui::RichText::new(format!("Data dir: {}", app.config.data_dir.display()))
+                    .font(theme::mono(11.0))
                     .color(pal.text_dim),
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Open").clicked() {
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::ghost_button(ui, "Open", pal, 88.0) {
                     open_dir(&app.config.data_dir);
                 }
             });

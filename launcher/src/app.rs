@@ -8,8 +8,10 @@ use egui::Context;
 
 use crate::config::accounts::{self, Account};
 use crate::config::app_config::Config;
+use crate::dev::DevState;
 use crate::minecraft::auth;
 use crate::minecraft::instance::GameInstanceConfig;
+use crate::minecraft::launch::LaunchedGame;
 use crate::net::download::DownloadManager;
 use crate::ui::{self, Screen};
 
@@ -27,10 +29,16 @@ pub struct LauncherApp {
     pub game_status: GameStatus,
     /// Shared handle the async launch task writes status to.
     pub status_handle: Arc<Mutex<GameStatus>>,
+    /// Handle to the running game process, if any (used to stop / monitor it).
+    pub game_process: Arc<Mutex<Option<LaunchedGame>>>,
     /// Pending gnuclient jar path to install into the active instance.
     pub pending_gnuclient_jar: Option<PathBuf>,
     /// Receiver for the async "select gnuclient jar" file-picker result.
     pub jar_pick_rx: Option<mpsc::Receiver<Option<PathBuf>>>,
+    /// Receiver for the async "select gnuclient source dir" folder-picker result.
+    pub dir_pick_rx: Option<mpsc::Receiver<Option<PathBuf>>>,
+    /// Dev tab state (recompile log + status + selected built jar).
+    pub dev: DevState,
     /// Search state shared across content tabs.
     pub search_query: String,
     /// Shared channels + per-tab content state.
@@ -122,8 +130,11 @@ impl LauncherApp {
             game_log: Arc::new(Mutex::new(Vec::new())),
             game_status: GameStatus::Idle,
             status_handle: Arc::new(Mutex::new(GameStatus::Idle)),
+            game_process: Arc::new(Mutex::new(None)),
             pending_gnuclient_jar: None,
             jar_pick_rx: None,
+            dir_pick_rx: None,
+            dev: DevState::new(),
             search_query: String::new(),
             state: crate::state::AppState::new(),
             active_instance_id,
@@ -178,6 +189,19 @@ impl LauncherApp {
         self.notice = None;
     }
 
+    /// Stop the running game instance (if any) and reset status to idle.
+    /// Used by the Play/Stop button once the game is `Running`.
+    pub fn stop_game(&mut self) {
+        let mut guard = self.game_process.lock().unwrap();
+        if let Some(mut launched) = guard.take() {
+            let _ = launched.child.kill();
+            let _ = launched.child.wait();
+        }
+        drop(guard);
+        *self.status_handle.lock().unwrap() = GameStatus::Exited(0);
+        self.launch_busy = false;
+    }
+
     /// Look up a cached icon texture for a Modrinth icon URL.
     pub fn icon_texture(&self, url: &str) -> Option<&egui::TextureHandle> {
         self.icons.get(url)
@@ -227,6 +251,7 @@ impl LauncherApp {
         self.drain_channels();
         self.poll_device_login();
         self.drain_jar_pick();
+        self.drain_dir_pick();
         self.drain_icons(ctx);
         // Sync status from the async launch task.
         let new_status = self.status_handle.lock().unwrap().clone();
@@ -359,6 +384,34 @@ impl LauncherApp {
                             crate::app::NoticeKind::Error,
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// Drain the async folder-picker result and remember the chosen source dir.
+    fn drain_dir_pick(&mut self) {
+        let picked = match &mut self.dir_pick_rx {
+            Some(rx) => match rx.try_recv() {
+                Ok(p) => Some(p),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.dir_pick_rx = None;
+                    None
+                }
+            },
+            None => None,
+        };
+        if let Some(path) = picked {
+            self.dir_pick_rx = None;
+            match path {
+                Some(p) => {
+                    self.config.dev_source_dir = Some(p);
+                    self.show_notice("GNUClient source set", NoticeKind::Success);
+                    self.persist();
+                }
+                None => {
+                    self.show_notice("Folder selection cancelled", NoticeKind::Info);
                 }
             }
         }

@@ -1,0 +1,5 @@
+/Users/levkoren/gnuclient-recode/launcher/target/release/deps/atomic_waker-08f94ded80a8b664.d: /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-waker-1.1.2/src/lib.rs
+
+/Users/levkoren/gnuclient-recode/launcher/target/release/deps/libatomic_waker-08f94ded80a8b664.rmeta: /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-waker-1.1.2/src/lib.rs
+
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/atomic-waker-1.1.2/src/lib.rs:
