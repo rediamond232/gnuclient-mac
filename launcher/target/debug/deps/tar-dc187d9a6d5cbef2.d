@@ -1,0 +1,12 @@
+/Users/levkoren/gnuclient-recode/launcher/target/debug/deps/tar-dc187d9a6d5cbef2.d: /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/lib.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/archive.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/builder.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry_type.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/error.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/header.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/pax.rs
+
+/Users/levkoren/gnuclient-recode/launcher/target/debug/deps/libtar-dc187d9a6d5cbef2.rmeta: /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/lib.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/archive.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/builder.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry_type.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/error.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/header.rs /Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/pax.rs
+
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/lib.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/archive.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/builder.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/entry_type.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/error.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/header.rs:
+/Users/levkoren/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tar-0.4.46/src/pax.rs:
